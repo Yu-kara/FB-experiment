@@ -7,21 +7,20 @@ const PREVIEW_MODE = false;
 
 // Cognition の Source code に貼り付ける jsPsych 8 / Survey 4 のコード（OpenAI API版・課題選択トップ画面付き）
 // External JS: OpenAI APIキーを暗号化した encrypted-api-key.js をアップロードしてください。
+// External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
-// Stimuli: 課題画像（または image_path に Base64 Data URL を直接貼り付け）を設定してください。
+// Stimuli: 課題画像は従来どおり教師画面に表示します（AIには送信しません）。
+// TASKS: 実験前にOCRで抽出した文章を ocr_text に設定してください。
 
-// ① システムプロンプトを1つに限定
+// ① 初期FBは表層的な誤りを優先し、後続対話は教師の指示に柔軟に対応
 const SYSTEM_PROMPT = `あなたは教員の文章指導を支援するAIです。
-【1回目の応答（課題画像が添付されている場合）】
-必ず以下の2つの見出しを使って、日本語で回答してください。
-【画像内の文章の文字起こし】
-添付された課題画像に書かれている文章を、誤字脱字や改行も含めて省略せずそのまま正確に文字起こししてください。
+【1回目の応答】
+提示された学習者の文章を原文とし、日本語で【フィードバック案】の見出しを使って回答してください。
+初期フィードバックでは文法・語彙・スペリングなど表層的な誤りを優先し、改善点と具体的な改善案（書き換え例を含む）を簡潔に提示してください。
+内容・構成についても必要に応じて指摘して構いません。学習者の意図を根拠なく断定しないでください。
 
-【フィードバック案】
-文字起こしした文章に基づき、改善点と具体的な改善案（書き換え例を含む）を簡潔に提示してください。
-
-【2回目以降の応答（画像は添付されず会話履歴のみが送られる場合）】
-1回目の応答に含まれる【画像内の文章の文字起こし】を原文として参照し、これまでのやり取りと教員からの最新の追質問・修正指示を踏まえて、日本語で簡潔に応答してください（2回目以降は文字起こしの再掲は不要です）。`;
+【2回目以降の応答】
+最初に提示された学習者の文章を原文として参照し、これまでのやり取りと教員からの最新の追質問・修正指示を踏まえて、日本語で簡潔に応答してください。教員の指示に応じて内容・構成・文脈に関する改善にも対応してください。`;
 
 // OpenAI の生成設定（必要に応じて model を "gpt-4o" や "gpt-4o-mini" 等に変更してください）
 const SETTINGS = {
@@ -33,440 +32,22 @@ const SETTINGS = {
 
 // 課題リスト（Stimuliのファイル名、または "data:image/png;base64,..." 形式の文字列を指定可能）
 const TASKS = [
-  { task_id: "task_1", task_label: "課題 1", image_path: "task1.png" },
-  { task_id: "task_2", task_label: "課題 2", image_path: "task2.png" },
-  { task_id: "task_3", task_label: "課題 3", image_path: "task3.png" }
+  { task_id: "task_1", task_label: "課題 1", image_path: "task1.png", ocr_text: null },
+  { task_id: "task_2", task_label: "課題 2", image_path: "task2.png", ocr_text: null },
+  { task_id: "task_3", task_label: "課題 3", image_path: "task3.png", ocr_text: null }
 ];
 
-// Survey 4 と トップ画面・全画面左右2カラムUIのスタイル調整
-const experimentStyle = document.createElement("style");
-experimentStyle.textContent = `
-  /* jsPsych と SurveyJS の横幅制限を解除 */
-  .jspsych-display-element { width: 100%; }
-  .jspsych-content-wrapper { width: 100%; }
-  .jspsych-content { box-sizing: border-box; width: 100%; max-width: 100%; margin: 0 auto; padding: 0 1rem; }
-  .sd-root-modern { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Yu Gothic", "Meiryo", sans-serif; width: 100%; }
-  .sd-container-modern { width: 100% !important; max-width: 100% !important; }
-  .sd-body, .sd-body.sd-body--responsive, .sd-body.sd-body--static {
-    box-sizing: border-box !important;
-    width: 100% !important;
-    max-width: 56rem !important;
-    margin: 0 auto !important;
-    padding: 0.75rem 1rem !important;
-  }
-  /* 2カラム対話画面のときだけブラウザの画面幅いっぱいまで広げる */
-  .jspsych-content:has(.split-workspace) { padding: 0 0.75rem; }
-  .sd-body:has(.split-workspace) {
-    max-width: 100% !important;
-    width: 100% !important;
-    padding: 0.5rem 0.75rem !important;
-  }
-  .sd-page, .sd-row, .sd-page__row, .sd-element, .sd-question, .sd-question__content, .sd-html {
-    box-sizing: border-box !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    min-width: 0 !important;
-  }
-  .sd-element--with-frame { padding: 0 !important; box-shadow: none !important; background: transparent !important; }
-  .sd-element__title { line-height: 1.4; }
-  .sd-input { font-size: 1rem; line-height: 1.5; }
-  textarea.sd-input { min-height: 6rem; max-width: 100%; }
-  .sd-btn--action { min-height: 2.75rem; background-color: #23395d; border-color: #23395d; color: #fff; }
-
-  /* プレビューモード通知バー */
-  .preview-banner {
-    background: #fef3c7;
-    color: #92400e;
-    border: 1px solid #f59e0b;
-    border-radius: 6px;
-    padding: 0.35rem 0.75rem;
-    font-size: 0.82rem;
-    font-weight: 600;
-    margin-bottom: 0.65rem;
-    text-align: center;
-  }
-
-  /* トップ画面（識別NO入力 ＆ 課題選択メニュー） */
-  .menu-container {
-    max-width: 44rem;
-    margin: 0.5rem auto;
-    background: #ffffff;
-    border: 1px solid #cbd5e1;
-    border-radius: 12px;
-    padding: 1.5rem 1.75rem;
-    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
-    text-align: left;
-  }
-  .menu-header {
-    border-bottom: 1px solid #e2e8f0;
-    padding-bottom: 0.85rem;
-    margin-bottom: 1.25rem;
-  }
-  .menu-title {
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: #0f172a;
-    margin: 0 0 0.25rem 0;
-  }
-  .menu-subtitle {
-    font-size: 0.9rem;
-    color: #475569;
-    margin: 0;
-  }
-  .participant-id-box {
-    background: #f8fafc;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    padding: 1rem 1.15rem;
-    margin-bottom: 1.35rem;
-  }
-  .participant-id-label {
-    display: block;
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: #1e293b;
-    margin-bottom: 0.4rem;
-  }
-  .participant-id-required {
-    background: #dc2626;
-    color: #ffffff;
-    font-size: 0.72rem;
-    padding: 0.1rem 0.45rem;
-    border-radius: 4px;
-    margin-left: 0.4rem;
-    vertical-align: middle;
-  }
-  .participant-id-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 0.6rem 0.85rem;
-    font-size: 1.05rem;
-    border: 1.5px solid #94a3b8;
-    border-radius: 8px;
-    background: #ffffff;
-    color: #0f172a;
-  }
-  .participant-id-input:focus {
-    outline: none;
-    border-color: #23395d;
-    box-shadow: 0 0 0 3px rgba(35, 57, 93, 0.14);
-  }
-  .menu-error-msg {
-    color: #dc2626;
-    font-size: 0.88rem;
-    font-weight: 700;
-    margin-top: 0.45rem;
-    display: none;
-  }
-  .task-list-heading {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: #1e293b;
-    margin: 0 0 0.65rem 0;
-  }
-  .task-card-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.65rem;
-  }
-  .task-card {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.85rem 1.1rem;
-    border: 1.5px solid #cbd5e1;
-    border-radius: 10px;
-    background: #ffffff;
-    transition: border-color 0.15s, background 0.15s;
-  }
-  .task-card:hover {
-    border-color: #23395d;
-    background: #f8fafc;
-  }
-  .task-card.is-done {
-    background: #f0fdfa;
-    border-color: #99f6e4;
-  }
-  .task-card-info {
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    flex-wrap: wrap;
-  }
-  .task-card-title {
-    font-size: 1.05rem;
-    font-weight: 700;
-    color: #0f172a;
-  }
-  .task-status-badge {
-    font-size: 0.76rem;
-    font-weight: 700;
-    padding: 0.18rem 0.55rem;
-    border-radius: 999px;
-  }
-  .task-status-badge.pending {
-    background: #e2e8f0;
-    color: #475569;
-  }
-  .task-status-badge.done {
-    background: #0f766e;
-    color: #ffffff;
-  }
-  .task-start-btn {
-    background: #23395d;
-    color: #ffffff;
-    border: none;
-    border-radius: 8px;
-    padding: 0.55rem 1.15rem;
-    font-size: 0.92rem;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s;
-  }
-  .task-start-btn:hover { background: #1a2b47; }
-  .task-card.is-done .task-start-btn {
-    background: #475569;
-  }
-  .task-card.is-done .task-start-btn:hover {
-    background: #334155;
-  }
-  .menu-footer {
-    margin-top: 1.5rem;
-    padding-top: 1rem;
-    border-top: 1px solid #e2e8f0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-  }
-  .menu-progress-text {
-    font-size: 0.88rem;
-    color: #475569;
-    font-weight: 600;
-  }
-  .menu-finish-btn {
-    background: #ffffff;
-    color: #475569;
-    border: 1.5px solid #94a3b8;
-    border-radius: 8px;
-    padding: 0.5rem 1.1rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .menu-finish-btn:hover {
-    background: #f1f5f9;
-    color: #0f172a;
-    border-color: #64748b;
-  }
-
-  /* 待機中のスピナー */
-  .ai-spinner {
-    width: 36px; height: 36px; margin: 0 auto;
-    border: 4px solid #cbd5e1; border-top-color: #23395d;
-    border-radius: 50%; animation: ai-spin 0.85s linear infinite;
-  }
-  @keyframes ai-spin { to { transform: rotate(360deg); } }
-
-  /* 左右2カラムレイアウト（画面幅いっぱいに展開） */
-  .split-workspace {
-    display: flex;
-    align-items: stretch;
-    gap: 1.25rem;
-    width: 100%;
-    height: calc(100vh - 2.2rem);
-    min-height: 520px;
-  }
-  .split-workspace.has-preview-banner {
-    height: calc(100vh - 4.6rem);
-  }
-  .workspace-left {
-    flex: 0 0 46%;
-    max-width: 46%;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .workspace-right {
-    flex: 1 1 54%;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    height: 100%;
-  }
-
-  /* 課題画像エリア */
-  .task-image-box {
-    margin: 0;
-    text-align: center;
-    background: #f8fafc;
-    padding: 0.65rem;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    height: 100%;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-  }
-  .task-image-box img {
-    width: 100%;
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: calc(100vh - 6rem);
-    height: auto;
-    display: block;
-    margin: 0 auto;
-    border-radius: 4px;
-    object-fit: contain;
-  }
-  /* 事前確認画面用の画像高さ調整 */
-  .task-intro-box {
-    height: auto;
-    max-width: 52rem;
-    margin: 0 auto;
-  }
-  .task-intro-box img {
-    width: auto;
-    max-width: 100%;
-    max-height: 60vh;
-  }
-
-  /* ChatGPT風のスクロール可能な対話タイムライン */
-  .chat-window-wrapper {
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    background: #ffffff;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
-  }
-  .chat-window-topbar {
-    background: #f1f5f9;
-    padding: 0.45rem 0.9rem;
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #475569;
-    border-bottom: 1px solid #e2e8f0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.75rem;
-    flex-shrink: 0;
-  }
-  .chat-thread-container {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 0.9rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    scroll-behavior: smooth;
-    background: #ffffff;
-  }
-
-  /* メッセージバブル */
-  .chat-row-user { display: flex; flex-direction: column; align-items: flex-end; }
-  .chat-bubble-user { max-width: 82%; background: #23395d; color: #ffffff; padding: 0.7rem 1rem; border-radius: 14px 14px 2px 14px; font-size: 0.96rem; line-height: 1.6; white-space: pre-wrap; }
-  .chat-meta-user { font-size: 0.78rem; color: #64748b; margin-bottom: 0.2rem; }
-
-  .chat-row-ai { display: flex; flex-direction: column; align-items: flex-start; }
-  .chat-bubble-ai { max-width: 94%; background: #f8fafc; color: #0f172a; border: 1px solid #e2e8f0; padding: 0.85rem 1.05rem; border-radius: 14px 14px 14px 2px; font-size: 0.98rem; line-height: 1.68; white-space: pre-wrap; }
-  .chat-bubble-ai.is-latest { border-color: #93c5fd; background: #f0f7ff; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.08); }
-  .chat-meta-ai { font-size: 0.8rem; font-weight: 600; color: #334155; margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.45rem; }
-  .chat-badge-new {
-    background: #2563eb;
-    color: #fff;
-    font-size: 0.7rem;
-    padding: 0.12rem 0.5rem;
-    border-radius: 999px;
-    font-weight: 700;
-    white-space: nowrap;
-    flex-shrink: 0;
-    line-height: 1.2;
-  }
-
-  /* ChatGPT風の入力ボックス＋右側送信ボタン */
-  .chat-composer-wrapper { margin-top: 0; flex-shrink: 0; }
-  .chat-composer {
-    display: flex;
-    align-items: flex-end;
-    gap: 0.5rem;
-    border: 1.5px solid #cbd5e1;
-    border-radius: 14px;
-    background: #ffffff;
-    padding: 0.45rem 0.5rem 0.45rem 0.85rem;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05);
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-  .chat-composer:focus-within {
-    border-color: #23395d;
-    box-shadow: 0 0 0 3px rgba(35, 57, 93, 0.12);
-  }
-  .chat-composer textarea {
-    flex: 1;
-    min-width: 0;
-    border: none;
-    outline: none;
-    resize: none;
-    font-family: inherit;
-    font-size: 0.96rem;
-    line-height: 1.5;
-    min-height: 2.5rem;
-    max-height: 120px;
-    padding: 0.15rem 0;
-    background: transparent;
-    color: #0f172a;
-  }
-  .chat-send-btn {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.35rem;
-    height: 2.35rem;
-    padding: 0 0.95rem;
-    border-radius: 10px;
-    border: none;
-    background: #23395d;
-    color: #ffffff;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s;
-  }
-  .chat-send-btn:hover { background: #1a2b47; }
-
-  /* 入力欄下のフッター（操作ヒント ＆ 対話終了ボタン） */
-  .chat-footer-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.6rem; margin-top: 0.45rem; }
-  .chat-hint-text { font-size: 0.78rem; color: #64748b; }
-  .chat-btn-finish { background: #ffffff; color: #0f766e; border: 2px solid #0f766e; border-radius: 8px; padding: 0.42rem 1.1rem; font-size: 0.9rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
-  .chat-btn-finish:hover { background: #f0fdfa; }
-  .chat-input-error { color: #dc2626; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; display: none; }
-
-  /* 画面幅が狭いタブレット・スマホでは自動で上下1列に切り替え */
-  @media (max-width: 860px) {
-    .split-workspace, .split-workspace.has-preview-banner { flex-direction: column; height: auto; }
-    .workspace-left, .workspace-right { flex: 1 1 100%; max-width: 100%; width: 100%; height: auto; }
-    .task-image-box { height: auto; }
-    .task-image-box img { max-height: 300px; width: auto; }
-    .chat-thread-container { height: 340px; }
-  }
-`;
+// スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
 
 // セッション状態管理変数
 let password = null;
 let participantId = "";
 let selectedTask = null;
 let currentAttemptId = 0;
+let currentAttemptUid = null;
+const sessionId = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+  ? crypto.randomUUID()
+  : `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 let shouldExitSession = false;
 const completedTaskIds = new Set();
 
@@ -495,6 +76,8 @@ const jsPsych = initJsPsych({
   }
 });
 
+jsPsych.data.addProperties({ session_id: sessionId });
+
 // プレビュー用のサンプル画像（SVG）
 const SAMPLE_SVG_IMAGE = "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(`
   <svg xmlns="http://www.w3.org/2000/svg" width="600" height="720" viewBox="0 0 600 720">
@@ -521,75 +104,6 @@ function getDisplayImageSrc(imagePath) {
   return SAMPLE_SVG_IMAGE;
 }
 
-// 課題画像を Data URL（Base64）へ変換・キャッシュ（1ターン目のみ使用）
-const imageDataUrlCache = {};
-async function getImageDataUrl(imagePath) {
-  if (String(imagePath).startsWith("data:")) return imagePath;
-  if (imageDataUrlCache[imagePath]) return imageDataUrlCache[imagePath];
-  const response = await fetch(imagePath);
-  if (!response.ok) throw new Error(`課題画像を読み込めませんでした: ${imagePath}`);
-  const blob = await response.blob();
-  const dataUrl = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error(`課題画像の変換に失敗しました: ${imagePath}`));
-    reader.readAsDataURL(blob);
-  });
-  imageDataUrlCache[imagePath] = dataUrl;
-  return dataUrl;
-}
-
-// 初回（1ターン目）専用：課題画像を1度だけ添付して OpenAI API へ送信
-async function generateInitialWithImage({ systemPrompt, text, imagePath }, callback) {
-  let dataUrl;
-  try {
-    dataUrl = await getImageDataUrl(imagePath);
-  } catch (err) {
-    callback({ api_error: err.message, ai_feedback: null, generation_attempt: 0 });
-    return;
-  }
-
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = async (url, options = {}) => {
-    const urlStr = typeof url === "string" ? url : (url && url.url) || "";
-    if (urlStr.includes("api.openai.com") && options.body && typeof options.body === "string") {
-      try {
-        const payload = JSON.parse(options.body);
-        if (typeof payload.input === "string") {
-          payload.input = [{
-            role: "user",
-            content: [
-              { type: "input_text", text: payload.input },
-              { type: "input_image", image_url: dataUrl }
-            ]
-          }];
-          options = { ...options, body: JSON.stringify(payload) };
-        } else if (Array.isArray(payload.messages)) {
-          const lastUserMsg = [...payload.messages].reverse().find(m => m.role === "user");
-          if (lastUserMsg && typeof lastUserMsg.content === "string") {
-            lastUserMsg.content = [
-              { type: "text", text: lastUserMsg.content },
-              { type: "image_url", image_url: { url: dataUrl } }
-            ];
-            options = { ...options, body: JSON.stringify(payload) };
-          }
-        }
-      } catch (e) {}
-    }
-    return originalFetch(url, options);
-  };
-
-  try {
-    FeedbackUtils.generate({ ...SETTINGS, systemPrompt, text }, result => {
-      window.fetch = originalFetch;
-      callback(result);
-    });
-  } catch (err) {
-    window.fetch = originalFetch;
-    callback({ api_error: String(err), ai_feedback: null, generation_attempt: 0 });
-  }
-}
-
 function escapeHtml(str) {
   return String(str ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -611,7 +125,7 @@ function buildChatThreadHtml(generations, pastReviews) {
 
   for (let i = 0; i < generations.length; i++) {
     const isLatest = i === latestIdx;
-    const aiLabel = i === 0 ? "AI（文字起こし・初期フィードバック）" : `AI（応答 ${i + 1}回目）`;
+    const aiLabel = i === 0 ? "AI（初期フィードバック）" : `AI（応答 ${i + 1}回目）`;
     const badgeHtml = isLatest ? `<span class="chat-badge-new">最新</span>` : "";
     const latestAttr = isLatest ? ` id="latest-ai-message"` : "";
     const latestClass = isLatest ? ` is-latest` : "";
@@ -661,7 +175,7 @@ const consent = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "consent" },
   stimulus: `<p>AIと協働して文章へのフィードバックを作成する実験です（全${TASKS.length}課題）。</p>
-    <p>提示された課題画像に対してAIがフィードバック案を生成します。チャット形式で自由にAIへ追質問や修正指示を送り、任意のタイミングで対話を終了して次の課題へ進んでください。</p>
+    <p>提示された課題の文章に対してAIがフィードバック案を生成します。チャット形式で自由にAIへ追質問や修正指示を送り、任意のタイミングで対話を終了して次の課題へ進んでください。</p>
     <p>AIとのすべてのやり取り・操作ログを記録します。個人情報は入力しないでください。</p>`,
   choices: ["同意する", "同意しない"]
 };
@@ -794,11 +308,9 @@ const taskMenu = {
 
       if (idInput && !idInput.dataset.bound) {
         idInput.dataset.bound = "1";
+        if (participantId) idInput.readOnly = true;
         idInput.addEventListener("input", () => {
-          participantId = idInput.value.trim();
-          if (participantId && idError) {
-            idError.style.display = "none";
-          }
+          if (idInput.value.trim() && idError) idError.style.display = "none";
         });
       }
 
@@ -812,12 +324,25 @@ const taskMenu = {
             if (idInput) idInput.focus();
             return;
           }
-          participantId = currentId;
-          jsPsych.data.addProperties({ participant_id: participantId });
-
+          if (participantId && currentId !== participantId) {
+            window.alert("参加者IDはこの実験中に変更できません。");
+            return;
+          }
           const taskIndex = Number(btn.getAttribute("data-task-index"));
-          selectedTask = TASKS[taskIndex];
+          const nextTask = TASKS[taskIndex];
+          if (!PREVIEW_MODE && !(typeof nextTask.ocr_text === "string" && nextTask.ocr_text.trim())) {
+            window.alert("この課題のOCR文章が未設定です。研究者がTASKSのocr_textを設定してください。");
+            return;
+          }
+          if (!participantId) {
+            participantId = currentId;
+            jsPsych.data.addProperties({ participant_id: participantId });
+          }
+          selectedTask = nextTask;
           currentAttemptId += 1;
+          currentAttemptUid = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+            ? crypto.randomUUID()
+            : `${sessionId}_attempt_${currentAttemptId}`;
           shouldExitSession = false;
           survey.completeLastPage();
         });
@@ -833,7 +358,7 @@ const taskMenu = {
           if (!window.confirm(confirmMsg)) return;
 
           const currentId = idInput ? idInput.value.trim() : participantId;
-          if (currentId) {
+          if (!participantId && currentId) {
             participantId = currentId;
             jsPsych.data.addProperties({ participant_id: participantId });
           }
@@ -853,6 +378,7 @@ const taskMenu = {
     data.selected_task_id = selectedTask ? selectedTask.task_id : null;
     data.selected_task_label = selectedTask ? selectedTask.task_label : null;
     data.attempt_id = selectedTask ? currentAttemptId : null;
+    data.attempt_uid = selectedTask ? currentAttemptUid : null;
     data.selected_at = new Date().toISOString();
     delete data.response;
   }
@@ -877,6 +403,7 @@ const taskIntro = {
   on_finish: data => {
     data.participant_id = participantId;
     data.attempt_id = currentAttemptId;
+    data.attempt_uid = currentAttemptUid;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
     data.image_path = selectedTask.image_path;
@@ -885,7 +412,7 @@ const taskIntro = {
   }
 };
 
-// 6. AI生成（1ターン目のみ画像送信＋文字起こし、2ターン目以降はテキスト履歴のみ送信）
+// 6. AI生成（初回はOCR済み文章、2ターン目以降は原文と対話履歴を送信）
 const generation = {
   type: jsPsychCallFunction,
   async: true,
@@ -893,7 +420,7 @@ const generation = {
     clearLoadingTimer();
     const count = jsPsych.data.get().filter({ feedback_phase: "generation", attempt_id: currentAttemptId }).count();
     const baseMsg = count === 0
-      ? "課題画像を読み取り、文字起こしと初期フィードバックを生成しています..."
+      ? "課題の文章に対する初期フィードバックを生成しています..."
       : "追質問に対するAIの回答を生成しています...";
     const startMs = Date.now();
     const renderWait = () => {
@@ -916,11 +443,12 @@ const generation = {
     const turnIndex = pastGenerations.length + 1;
     const isFirstTurn = turnIndex === 1;
 
-    let apiInputText = "添付した課題画像の文章をすべて正確に文字起こししたうえで、学習者への初期フィードバック案を作成してください。";
+    const ocrText = selectedTask.ocr_text || "";
+    let apiInputText = `【学習者の文章】\n${ocrText}\n\n上記の文章に対する初期フィードバック案を作成してください。`;
     let userPromptInTurn = null;
 
     if (!isFirstTurn) {
-      const historyLines = ["以下は、1回目に読み取った課題画像の文字起こしおよびこれまでのやり取りの履歴です。"];
+      const historyLines = [`【学習者の文章】\n${ocrText}`, "以下は、これまでのやり取りの履歴です。"];
       for (let i = 0; i < pastGenerations.length; i++) {
         historyLines.push(`【AIの回答（${i + 1}回目）】\n${pastGenerations[i].ai_feedback}`);
         if (pastReviews[i] && pastReviews[i].followup_prompt) {
@@ -928,18 +456,20 @@ const generation = {
         }
       }
       userPromptInTurn = pastReviews[pastReviews.length - 1].followup_prompt;
-      historyLines.push("上記の【画像内の文章の文字起こし】とこれまでのやり取りを踏まえ、最新の教員からの追質問・修正指示に対して新たな回答を提示してください。");
+      historyLines.push("上記の学習者の文章とこれまでのやり取りを踏まえ、最新の教員からの追質問・修正指示に対して新たな回答を提示してください。");
       apiInputText = historyLines.join("\n\n");
     }
 
     const record = {
       participant_id: participantId,
       attempt_id: currentAttemptId,
+      attempt_uid: currentAttemptUid,
       task_id: selectedTask.task_id,
       task_label: selectedTask.task_label,
       image_path: selectedTask.image_path,
       turn_index: turnIndex,
-      image_sent: isFirstTurn,
+      image_sent: false,
+      ocr_text: ocrText,
       user_prompt: userPromptInTurn,
       system_prompt: SYSTEM_PROMPT,
       api_input: apiInputText,
@@ -954,24 +484,21 @@ const generation = {
     if (PREVIEW_MODE) {
       setTimeout(() => {
         const dummyText = isFirstTurn
-          ? `【画像内の文章の文字起こし】\n私が最も印象に残っている本は、夏目漱石の「こころ」です。最初は難しい言葉が多くて読み進めるのが大変でしたが、後半になるにつれて登場人物の気持ちの変化が分かり、とても面白くなりました。\n\n特に「私」と先生の関係がどうなるのか気になって最後まで一気に読みました。人間の弱さや優しさについて考えさせられる一冊でした。\n\n【フィードバック案】\n作品を読み進める中で気持ちが引き込まれていった様子が素直な言葉で書けており、読み手に熱意が伝わる良い文章です。\n\n■ 改善のポイント\n1. 「面白くなりました」という表現を、どのような感情や気づきがあったのか具体的に書き換えると、より説得力が増します。\n2. 後半の展開に触れる際は、一番心が動いた場面を1つ挙げて理由を添えてみましょう。`
+          ? `【フィードバック案】\n作品を読み進める中で気持ちが引き込まれていった様子が素直な言葉で書けており、読み手に熱意が伝わる良い文章です。\n\n■ 改善のポイント\n1. 「面白くなりました」という表現を、どのような感情や気づきがあったのか具体的に書き換えると、より説得力が増します。\n2. 後半の展開に触れる際は、一番心が動いた場面を1つ挙げて理由を添えてみましょう。`
           : `ご指示（「${userPromptInTurn}」）を踏まえて調整したダミー応答です。\n\n■ 修正フィードバック案\n生徒が自信を持って書き直せるよう、まずは良い点を具体的に褒めたうえで、「一番印象に残った場面を1つだけ詳しく書いてみよう」と声かけをする構成に整えました。`;
         done({ ...record, api_error: null, ai_feedback: dummyText, generation_attempt: 1 });
       }, 350);
       return;
     }
 
-    if (isFirstTurn) {
-      generateInitialWithImage(
-        { systemPrompt: SYSTEM_PROMPT, text: apiInputText, imagePath: selectedTask.image_path },
-        result => done({ ...record, ...result })
-      );
-    } else {
-      FeedbackUtils.generate(
-        { ...SETTINGS, systemPrompt: SYSTEM_PROMPT, text: apiInputText },
-        result => done({ ...record, ...result })
-      );
+    if (!ocrText.trim()) {
+      done({ ...record, api_error: "OCR文章が未設定です。", ai_feedback: null, generation_attempt: 0 });
+      return;
     }
+    FeedbackUtils.generate(
+      { ...SETTINGS, systemPrompt: SYSTEM_PROMPT, text: apiInputText },
+      result => done({ ...record, ...result })
+    );
   },
   on_finish: data => {
     clearLoadingTimer();
@@ -1105,6 +632,8 @@ const reviewAndRefine = {
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
     data.image_path = selectedTask.image_path;
+    data.ocr_text = selectedTask.ocr_text;
+    data.attempt_uid = currentAttemptUid;
     data.turn_index = generations.length;
     data.ai_feedback_reviewed = currentGen.ai_feedback;
     data.action = action;
@@ -1120,7 +649,8 @@ const reviewAndRefine = {
         return {
           turn: gen.turn_index,
           image_sent: gen.image_sent,
-          user_prompt: gen.user_prompt || "（初回生成依頼：文字起こし＋初期FB）",
+          ocr_text: gen.ocr_text,
+          user_prompt: gen.user_prompt || "（初回生成依頼：初期FB）",
           ai_feedback: gen.ai_feedback,
           action: rev.action || null,
           followup_prompt: rev.followup_prompt || null,
@@ -1131,7 +661,7 @@ const reviewAndRefine = {
 
       const readableHistory = structuredHistory.map(item => {
         const lines = [
-          `=== ターン ${item.turn}（画像送信: ${item.image_sent ? "あり" : "なし"}） ===`,
+          `=== ターン ${item.turn} ===`,
           `[教員の指示] ${item.user_prompt}`,
           `[AIの応答]\n${item.ai_feedback}`
         ];
@@ -1142,6 +672,7 @@ const reviewAndRefine = {
       data.task_completed = true;
       data.total_turns = generations.length;
       data.followup_count = generations.length - 1;
+      data.ocr_text = selectedTask.ocr_text;
       data.initial_ai_output = generations[0].ai_feedback;
       data.final_ai_output = currentGen.ai_feedback;
       data.interaction_history_json = JSON.stringify(structuredHistory);
@@ -1165,6 +696,7 @@ const generationFailure = {
   on_finish: data => {
     data.participant_id = participantId;
     data.attempt_id = currentAttemptId;
+    data.attempt_uid = currentAttemptUid;
     data.task_id = selectedTask ? selectedTask.task_id : null;
   }
 };
@@ -1253,7 +785,6 @@ feedbackUtilsScript.onerror = () => {
   }
 };
 surveyStylesheet.onload = () => {
-  document.head.append(experimentStyle);
   document.head.append(feedbackUtilsScript);
 };
 surveyStylesheet.onerror = () => {
