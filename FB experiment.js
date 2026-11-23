@@ -31,9 +31,10 @@ const SETTINGS = {
 
 // 課題ごとに研究者が作成した作文を設定する（同じessay_textを教師画面とAIで使用）
 const TASKS = [
-  { task_id: "task_1", task_label: "課題 1", essay_id: "essay_1", essay_text: null },
-  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", essay_text: null },
-  { task_id: "task_3", task_label: "課題 3", essay_id: "essay_3", essay_text: null }
+  { task_id: "task_1", task_label: "課題 1", essay_id: "essay_1", condition: "teacher_only", essay_text: null },
+  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", condition: "collaborative", essay_text: null },
+  { task_id: "task_3", task_label: "課題 3", essay_id: "essay_3", condition: "teacher_only", essay_text: null },
+  { task_id: "task_4", task_label: "課題 4", essay_id: "essay_4", condition: "collaborative", essay_text: null }
 ];
 
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
@@ -53,6 +54,7 @@ const completedTaskIds = new Set();
 let pendingReviewAction = null;
 let pendingFollowupText = null;
 let teacherFinalDraft = "";
+let taskStartedAt = null;
 let loadingTimerId = null;
 
 // プレビュー用のダミー履歴保持（課題IDごと）
@@ -156,8 +158,8 @@ function scrollToLatestMessage() {
 const consent = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "consent" },
-  stimulus: `<p>AIと協働して文章へのフィードバックを作成する実験です（全${TASKS.length}課題）。</p>
-    <p>研究者が作成した作文に対してAIがフィードバック案を生成します。教師がAIとの対話を参考に最終フィードバックを作成します。チャット形式で自由にAIへ追質問や修正指示を送り、任意のタイミングで対話を終了して次の課題へ進んでください。</p>
+  stimulus: `<p>作文へのフィードバックを作成する実験です（全${TASKS.length}課題）。</p>
+    <p>教師単独FBではAIを使わず、AI・教師協働FBではAIの支援を参考にして、教師が最終フィードバックを作成してください。</p>
     <p>AIとのすべてのやり取り・操作ログを記録します。個人情報は入力しないでください。</p>`,
   choices: ["同意する", "同意しない"]
 };
@@ -240,11 +242,13 @@ const taskMenu = {
         ? `<span class="task-status-badge done">実施済み</span>`
         : `<span class="task-status-badge pending">未実施</span>`;
       const btnText = isDone ? "もう一度開く" : "この課題を開始";
+      const conditionLabel = task.condition === "teacher_only" ? "教師単独FB" : "AI・教師協働FB";
 
       return `
         <div class="${cardClass}">
           <div class="task-card-info">
             <span class="task-card-title">${escapeHtml(task.task_label)}</span>
+            <span class="task-condition-label">${conditionLabel}</span>
             ${badgeHtml}
           </div>
           <button type="button" class="task-start-btn" data-task-index="${index}">${btnText}</button>
@@ -322,6 +326,7 @@ const taskMenu = {
           }
           selectedTask = nextTask;
           teacherFinalDraft = "";
+          taskStartedAt = new Date().toISOString();
           currentAttemptId += 1;
           currentAttemptUid = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
             ? crypto.randomUUID()
@@ -360,6 +365,7 @@ const taskMenu = {
     data.menu_action = shouldExitSession ? "exit_experiment" : "select_task";
     data.selected_task_id = selectedTask ? selectedTask.task_id : null;
     data.selected_task_label = selectedTask ? selectedTask.task_label : null;
+    data.condition = selectedTask ? selectedTask.condition : null;
     data.attempt_id = selectedTask ? currentAttemptId : null;
     data.attempt_uid = selectedTask ? currentAttemptUid : null;
     data.selected_at = new Date().toISOString();
@@ -378,6 +384,7 @@ const taskIntro = {
   },
   survey_function: survey => {
     survey.getQuestionByName("task_essay_view").html = buildTaskEssayHtml(selectedTask, "task-intro-box");
+    survey.completeText = selectedTask.condition === "teacher_only" ? "教師単独FBを開始" : "AIに初期フィードバックを生成させる";
   },
   on_finish: data => {
     data.participant_id = participantId;
@@ -385,6 +392,7 @@ const taskIntro = {
     data.attempt_uid = currentAttemptUid;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
+    data.condition = selectedTask.condition;
     data.essay_id = selectedTask.essay_id;
     data.essay_text = getEssayText(selectedTask);
     data.viewed_at = new Date().toISOString();
@@ -446,6 +454,7 @@ const generation = {
       attempt_uid: currentAttemptUid,
       task_id: selectedTask.task_id,
       task_label: selectedTask.task_label,
+      condition: selectedTask.condition,
       essay_id: selectedTask.essay_id,
       essay_text: essayText,
       turn_index: turnIndex,
@@ -635,6 +644,7 @@ const reviewAndRefine = {
     data.attempt_id = currentAttemptId;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
+    data.condition = selectedTask.condition;
     data.essay_id = selectedTask.essay_id;
     data.essay_text = getEssayText(selectedTask);
     data.attempt_uid = currentAttemptUid;
@@ -676,11 +686,100 @@ const reviewAndRefine = {
       data.followup_count = generations.length - 1;
       data.initial_ai_output = generations[0].ai_feedback;
       data.teacher_final_feedback = teacherFinalDraft.trim();
+      data.task_started_at = taskStartedAt;
+      data.task_completed_at = new Date().toISOString();
+      data.task_duration_ms = taskStartedAt ? Date.parse(data.task_completed_at) - Date.parse(taskStartedAt) : null;
       data.interaction_history_json = JSON.stringify(structuredHistory);
       data.interaction_history_text = readableHistory;
       teacherFinalDraft = "";
     }
 
+    delete data.response;
+  }
+};
+
+// 教師単独FB：AIの通信や生成を行わず、教師が最終FBを作成する
+const teacherOnlyFeedback = {
+  type: jsPsychSurvey,
+  min_width: "0px",
+  data: { feedback_phase: "teacher_only_feedback" },
+  survey_json: {
+    widthMode: "responsive",
+    showQuestionNumbers: "off",
+    showCompletedPage: false,
+    showNavigationButtons: false,
+    elements: [{ type: "html", name: "teacher_only_workspace" }]
+  },
+  survey_function: survey => {
+    const bannerHtml = PREVIEW_MODE ? `<div class="preview-banner">【プレビューモード】教師単独FB（API通信なし）</div>` : "";
+    survey.getQuestionByName("teacher_only_workspace").html = `
+      ${bannerHtml}
+      <div class="${PREVIEW_MODE ? "split-workspace has-preview-banner" : "split-workspace"}">
+        <div class="workspace-left">
+          <div class="teacher-only-notice">
+            <h3>教師単独フィードバック</h3>
+            <p>この課題ではAIを使用せず、教師自身でフィードバックを作成してください。</p>
+          </div>
+        </div>
+        <div class="workspace-right">
+          ${buildTaskEssayHtml(selectedTask)}
+          <div class="teacher-final-box">
+            <label for="teacher-only-final-feedback" class="teacher-final-label">最終FB（教師が作成）</label>
+            <textarea id="teacher-only-final-feedback" class="teacher-final-textarea" placeholder="最終フィードバックを入力してください。">${escapeHtml(teacherFinalDraft)}</textarea>
+            <div id="teacher-only-error" class="chat-input-error">最終FBを入力してください。</div>
+            <div class="teacher-only-footer"><button type="button" id="teacher-only-finish" class="chat-btn-finish">最終FBを確定して課題選択へ戻る</button></div>
+          </div>
+        </div>
+      </div>`;
+    const bindControls = () => {
+      const textarea = document.getElementById("teacher-only-final-feedback");
+      const finish = document.getElementById("teacher-only-finish");
+      const error = document.getElementById("teacher-only-error");
+      if (textarea && !textarea.dataset.bound) {
+        textarea.dataset.bound = "1";
+        textarea.addEventListener("input", () => {
+          teacherFinalDraft = textarea.value;
+          if (teacherFinalDraft.trim() && error) error.style.display = "none";
+        });
+      }
+      if (finish && !finish.dataset.bound) {
+        finish.dataset.bound = "1";
+        finish.addEventListener("click", () => {
+          teacherFinalDraft = textarea ? textarea.value : "";
+          if (!teacherFinalDraft.trim()) {
+            if (error) error.style.display = "block";
+            if (textarea) textarea.focus();
+            return;
+          }
+          survey.completeLastPage();
+        });
+      }
+    };
+    survey.onAfterRenderPage.add(bindControls);
+    setTimeout(bindControls, 50);
+  },
+  on_finish: data => {
+    const completedAt = new Date().toISOString();
+    data.participant_id = participantId;
+    data.attempt_id = currentAttemptId;
+    data.attempt_uid = currentAttemptUid;
+    data.task_id = selectedTask.task_id;
+    data.task_label = selectedTask.task_label;
+    data.condition = selectedTask.condition;
+    data.essay_id = selectedTask.essay_id;
+    data.essay_text = getEssayText(selectedTask);
+    data.teacher_final_feedback = teacherFinalDraft.trim();
+    data.initial_ai_output = null;
+    data.interaction_history_json = "[]";
+    data.interaction_history_text = "";
+    data.total_turns = 0;
+    data.followup_count = 0;
+    data.task_completed = true;
+    data.task_started_at = taskStartedAt;
+    data.task_completed_at = completedAt;
+    data.task_duration_ms = taskStartedAt ? Date.parse(completedAt) - Date.parse(taskStartedAt) : null;
+    completedTaskIds.add(selectedTask.task_id);
+    teacherFinalDraft = "";
     delete data.response;
   }
 };
@@ -733,7 +832,11 @@ const collaborativeLoop = {
 
 // 選択された1つの課題を実行するサブタイムライン
 const runSelectedTaskTimeline = {
-  timeline: [taskIntro, collaborativeLoop],
+  timeline: [
+    taskIntro,
+    { timeline: [teacherOnlyFeedback], conditional_function: () => selectedTask.condition === "teacher_only" },
+    { timeline: [collaborativeLoop], conditional_function: () => selectedTask.condition === "collaborative" }
+  ],
   conditional_function: () => !shouldExitSession && Boolean(selectedTask)
 };
 
