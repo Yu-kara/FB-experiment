@@ -1,6 +1,6 @@
 // =========================================================================
 // ★ プレビュー切り替えスイッチ ★
-// true  : APIキー・画像なしで「トップ画面〜AIとの会話画面」の流れを即座に確認できます
+// true  : APIキーなしで「トップ画面〜AIとの会話画面」の流れを即座に確認できます
 // false : 本番モード（同意確認 → パスワード認証 → トップ画面 → AI対話）で動作します
 // =========================================================================
 const PREVIEW_MODE = false;
@@ -9,8 +9,7 @@ const PREVIEW_MODE = false;
 // External JS: OpenAI APIキーを暗号化した encrypted-api-key.js をアップロードしてください。
 // External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
-// Stimuli: 課題画像は従来どおり教師画面に表示します（AIには送信しません）。
-// TASKS: 実験前にOCRで抽出した文章を ocr_text に設定してください。
+// TASKS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
 
 // ① 初期FBは表層的な誤りを優先し、後続対話は教師の指示に柔軟に対応
 const SYSTEM_PROMPT = `あなたは教員の文章指導を支援するAIです。
@@ -27,14 +26,14 @@ const SETTINGS = {
   model: "gpt-6-luna",
   reasoningEffort: "none",
   temperature: 0.3,
-  maxOutputTokens: 1500
+  maxOutputTokens: 8000
 };
 
-// 課題リスト（Stimuliのファイル名、または "data:image/png;base64,..." 形式の文字列を指定可能）
+// 課題ごとに研究者が作成した作文を設定する（同じessay_textを教師画面とAIで使用）
 const TASKS = [
-  { task_id: "task_1", task_label: "課題 1", image_path: "task1.png", ocr_text: null },
-  { task_id: "task_2", task_label: "課題 2", image_path: "task2.png", ocr_text: null },
-  { task_id: "task_3", task_label: "課題 3", image_path: "task3.png", ocr_text: null }
+  { task_id: "task_1", task_label: "課題 1", essay_id: "essay_1", essay_text: null },
+  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", essay_text: null },
+  { task_id: "task_3", task_label: "課題 3", essay_id: "essay_3", essay_text: null }
 ];
 
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
@@ -53,6 +52,7 @@ const completedTaskIds = new Set();
 
 let pendingReviewAction = null;
 let pendingFollowupText = null;
+let teacherFinalDraft = "";
 let loadingTimerId = null;
 
 // プレビュー用のダミー履歴保持（課題IDごと）
@@ -78,43 +78,25 @@ const jsPsych = initJsPsych({
 
 jsPsych.data.addProperties({ session_id: sessionId });
 
-// プレビュー用のサンプル画像（SVG）
-const SAMPLE_SVG_IMAGE = "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(`
-  <svg xmlns="http://www.w3.org/2000/svg" width="600" height="720" viewBox="0 0 600 720">
-    <rect width="600" height="720" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
-    <rect x="30" y="30" width="540" height="660" fill="#fdfdfb" stroke="#94a3b8" stroke-width="1.5"/>
-    <text x="55" y="75" font-family="sans-serif" font-size="20" font-weight="bold" fill="#334155">【サンプル課題原稿】読書感想文</text>
-    <line x1="50" y1="92" x2="550" y2="92" stroke="#cbd5e1" stroke-width="1"/>
-    <text x="55" y="135" font-family="sans-serif" font-size="18" fill="#1e293b"> 私が最も印象に残っている本は、夏目漱石の「こころ」</text>
-    <text x="55" y="175" font-family="sans-serif" font-size="18" fill="#1e293b">です。最初は難しい言葉が多くて読み進めるのが大変でし</text>
-    <text x="55" y="215" font-family="sans-serif" font-size="18" fill="#1e293b">たが、後半になるにつれて登場人物の気持ちの変化が分か</text>
-    <text x="55" y="255" font-family="sans-serif" font-size="18" fill="#1e293b">り、とても面白くなりました。</text>
-    <text x="55" y="310" font-family="sans-serif" font-size="18" fill="#1e293b"> 特に「私」と先生の関係がどうなるのか気になって最後</text>
-    <text x="55" y="350" font-family="sans-serif" font-size="18" fill="#1e293b">まで一気に読みました。人間の弱さや優しさについて考え</text>
-    <text x="55" y="390" font-family="sans-serif" font-size="18" fill="#1e293b">させられる一冊でした。</text>
-    <text x="55" y="655" font-family="sans-serif" font-size="14" fill="#64748b">※ これはプレビュー用のサンプル画像です</text>
-  </svg>
-`);
-
-function getDisplayImageSrc(imagePath) {
-  if (!PREVIEW_MODE) return imagePath;
-  if (String(imagePath).startsWith("data:") || String(imagePath).startsWith("http")) {
-    return imagePath;
-  }
-  return SAMPLE_SVG_IMAGE;
-}
+// プレビュー専用の例文。研究用のTASKSには使用しない。
+const PREVIEW_ESSAY = "I likes English because it is very interesting. I study English every days.";
 
 function escapeHtml(str) {
   return String(str ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function buildTaskImageHtml(taskLabel, imagePath, extraClass = "") {
-  const cls = extraClass ? `task-image-box ${extraClass}` : "task-image-box";
-  const src = getDisplayImageSrc(imagePath);
+function getEssayText(task) {
+  return (typeof task.essay_text === "string" && task.essay_text.trim())
+    ? task.essay_text
+    : (PREVIEW_MODE ? PREVIEW_ESSAY : "");
+}
+
+function buildTaskEssayHtml(task, extraClass = "") {
+  const cls = extraClass ? `task-essay-box ${extraClass}` : "task-essay-box";
   return `<div class="${cls}">
-    <div style="font-size: 0.92rem; font-weight: 700; margin-bottom: 0.45rem; color: #1e293b; flex-shrink: 0;">${escapeHtml(taskLabel)}：課題画像</div>
-    <img src="${escapeHtml(src)}" alt="${escapeHtml(taskLabel)}">
+    <div class="task-essay-heading">${escapeHtml(task.task_label)}：作文</div>
+    <div class="task-essay-text">${escapeHtml(getEssayText(task))}</div>
   </div>`;
 }
 
@@ -175,7 +157,7 @@ const consent = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "consent" },
   stimulus: `<p>AIと協働して文章へのフィードバックを作成する実験です（全${TASKS.length}課題）。</p>
-    <p>提示された課題の文章に対してAIがフィードバック案を生成します。チャット形式で自由にAIへ追質問や修正指示を送り、任意のタイミングで対話を終了して次の課題へ進んでください。</p>
+    <p>研究者が作成した作文に対してAIがフィードバック案を生成します。教師がAIとの対話を参考に最終フィードバックを作成します。チャット形式で自由にAIへ追質問や修正指示を送り、任意のタイミングで対話を終了して次の課題へ進んでください。</p>
     <p>AIとのすべてのやり取り・操作ログを記録します。個人情報は入力しないでください。</p>`,
   choices: ["同意する", "同意しない"]
 };
@@ -330,8 +312,8 @@ const taskMenu = {
           }
           const taskIndex = Number(btn.getAttribute("data-task-index"));
           const nextTask = TASKS[taskIndex];
-          if (!PREVIEW_MODE && !(typeof nextTask.ocr_text === "string" && nextTask.ocr_text.trim())) {
-            window.alert("この課題のOCR文章が未設定です。研究者がTASKSのocr_textを設定してください。");
+          if (!PREVIEW_MODE && !(typeof nextTask.essay_text === "string" && nextTask.essay_text.trim())) {
+            window.alert("この課題の作文が未設定です。研究者がTASKSのessay_textを設定してください。");
             return;
           }
           if (!participantId) {
@@ -339,6 +321,7 @@ const taskMenu = {
             jsPsych.data.addProperties({ participant_id: participantId });
           }
           selectedTask = nextTask;
+          teacherFinalDraft = "";
           currentAttemptId += 1;
           currentAttemptUid = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
             ? crypto.randomUUID()
@@ -384,21 +367,17 @@ const taskMenu = {
   }
 };
 
-// 5. 課題画像の事前確認
+// 5. 作文の事前確認
 const taskIntro = {
   type: jsPsychSurvey,
   min_width: "0px",
   data: { feedback_phase: "task_intro" },
   survey_json: {
     showQuestionNumbers: "off", showCompletedPage: false, completeText: "AIに初期フィードバックを生成させる",
-    elements: [{ type: "html", name: "task_image_view" }]
+    elements: [{ type: "html", name: "task_essay_view" }]
   },
   survey_function: survey => {
-    survey.getQuestionByName("task_image_view").html = buildTaskImageHtml(
-      selectedTask.task_label,
-      selectedTask.image_path,
-      "task-intro-box"
-    );
+    survey.getQuestionByName("task_essay_view").html = buildTaskEssayHtml(selectedTask, "task-intro-box");
   },
   on_finish: data => {
     data.participant_id = participantId;
@@ -406,13 +385,14 @@ const taskIntro = {
     data.attempt_uid = currentAttemptUid;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
-    data.image_path = selectedTask.image_path;
+    data.essay_id = selectedTask.essay_id;
+    data.essay_text = getEssayText(selectedTask);
     data.viewed_at = new Date().toISOString();
     delete data.response;
   }
 };
 
-// 6. AI生成（初回はOCR済み文章、2ターン目以降は原文と対話履歴を送信）
+// 6. AI生成（初回は作文テキスト、2ターン目以降は原文と対話履歴を送信）
 const generation = {
   type: jsPsychCallFunction,
   async: true,
@@ -443,12 +423,12 @@ const generation = {
     const turnIndex = pastGenerations.length + 1;
     const isFirstTurn = turnIndex === 1;
 
-    const ocrText = selectedTask.ocr_text || "";
-    let apiInputText = `【学習者の文章】\n${ocrText}\n\n上記の文章に対する初期フィードバック案を作成してください。`;
+    const essayText = getEssayText(selectedTask);
+    let apiInputText = `【学習者の文章】\n${essayText}\n\n上記の文章に対する初期フィードバック案を作成してください。`;
     let userPromptInTurn = null;
 
     if (!isFirstTurn) {
-      const historyLines = [`【学習者の文章】\n${ocrText}`, "以下は、これまでのやり取りの履歴です。"];
+      const historyLines = [`【学習者の文章】\n${essayText}`, "以下は、これまでのやり取りの履歴です。"];
       for (let i = 0; i < pastGenerations.length; i++) {
         historyLines.push(`【AIの回答（${i + 1}回目）】\n${pastGenerations[i].ai_feedback}`);
         if (pastReviews[i] && pastReviews[i].followup_prompt) {
@@ -466,10 +446,9 @@ const generation = {
       attempt_uid: currentAttemptUid,
       task_id: selectedTask.task_id,
       task_label: selectedTask.task_label,
-      image_path: selectedTask.image_path,
+      essay_id: selectedTask.essay_id,
+      essay_text: essayText,
       turn_index: turnIndex,
-      image_sent: false,
-      ocr_text: ocrText,
       user_prompt: userPromptInTurn,
       system_prompt: SYSTEM_PROMPT,
       api_input: apiInputText,
@@ -491,8 +470,8 @@ const generation = {
       return;
     }
 
-    if (!ocrText.trim()) {
-      done({ ...record, api_error: "OCR文章が未設定です。", ai_feedback: null, generation_attempt: 0 });
+    if (!essayText.trim()) {
+      done({ ...record, api_error: "作文が未設定です。", ai_feedback: null, generation_attempt: 0 });
       return;
     }
     FeedbackUtils.generate(
@@ -532,7 +511,7 @@ const reviewAndRefine = {
       ? `<div class="preview-banner">【プレビューモード】参加者ID: ${escapeHtml(participantId)} ／ ${escapeHtml(selectedTask.task_label)}（API通信なし）</div>`
       : "";
     const workspaceClass = PREVIEW_MODE ? "split-workspace has-preview-banner" : "split-workspace";
-    const leftColumnHtml = buildTaskImageHtml(selectedTask.task_label, selectedTask.image_path);
+    const essayPanelHtml = buildTaskEssayHtml(selectedTask);
     const chatThreadHtml = buildChatThreadHtml(generations, pastReviews);
     const composerHtml = `
       <div class="chat-composer-wrapper">
@@ -551,15 +530,24 @@ const reviewAndRefine = {
       </div>
     `;
 
+    const teacherFeedbackHtml = `
+      <div class="teacher-final-box">
+        <label class="teacher-final-label" for="teacher-final-feedback">最終FB（教師が作成）</label>
+        <textarea id="teacher-final-feedback" class="teacher-final-textarea" placeholder="AIとの対話を参考に、教師自身の最終フィードバックを入力してください。">${escapeHtml(teacherFinalDraft)}</textarea>
+        <div id="teacher-final-error" class="chat-input-error">最終FBを入力してください。</div>
+      </div>
+    `;
+
     survey.getQuestionByName("collaborative_workspace").html = `
       ${bannerHtml}
       <div class="${workspaceClass}">
         <div class="workspace-left">
-          ${leftColumnHtml}
-        </div>
-        <div class="workspace-right">
           ${chatThreadHtml}
           ${composerHtml}
+        </div>
+        <div class="workspace-right">
+          ${essayPanelHtml}
+          ${teacherFeedbackHtml}
         </div>
       </div>
     `;
@@ -570,6 +558,15 @@ const reviewAndRefine = {
       const btnSend = document.getElementById("btn-chat-send");
       const btnFinish = document.getElementById("btn-chat-finish");
       const errBox = document.getElementById("chat-input-error");
+      const finalInputEl = document.getElementById("teacher-final-feedback");
+      const finalError = document.getElementById("teacher-final-error");
+      if (finalInputEl && !finalInputEl.dataset.bound) {
+        finalInputEl.dataset.bound = "1";
+        finalInputEl.addEventListener("input", () => {
+          teacherFinalDraft = finalInputEl.value;
+          if (teacherFinalDraft.trim() && finalError) finalError.style.display = "none";
+        });
+      }
 
       const submitFollowup = () => {
         const text = inputEl ? inputEl.value.trim() : "";
@@ -579,6 +576,7 @@ const reviewAndRefine = {
           return;
         }
         if (errBox) errBox.style.display = "none";
+        if (finalInputEl) teacherFinalDraft = finalInputEl.value;
         pendingReviewAction = "refine";
         pendingFollowupText = text;
         survey.completeLastPage();
@@ -610,6 +608,12 @@ const reviewAndRefine = {
           if (unsentText && !window.confirm("入力欄に未送信のメッセージがあります。送信せずに対話を終了して課題選択へ戻りますか？")) {
             return;
           }
+          if (finalInputEl) teacherFinalDraft = finalInputEl.value;
+          if (!teacherFinalDraft.trim()) {
+            if (finalError) finalError.style.display = "block";
+            if (finalInputEl) finalInputEl.focus();
+            return;
+          }
           pendingReviewAction = "finish";
           pendingFollowupText = null;
           survey.completeLastPage();
@@ -631,8 +635,8 @@ const reviewAndRefine = {
     data.attempt_id = currentAttemptId;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
-    data.image_path = selectedTask.image_path;
-    data.ocr_text = selectedTask.ocr_text;
+    data.essay_id = selectedTask.essay_id;
+    data.essay_text = getEssayText(selectedTask);
     data.attempt_uid = currentAttemptUid;
     data.turn_index = generations.length;
     data.ai_feedback_reviewed = currentGen.ai_feedback;
@@ -648,8 +652,6 @@ const reviewAndRefine = {
         const rev = allReviews[idx] || {};
         return {
           turn: gen.turn_index,
-          image_sent: gen.image_sent,
-          ocr_text: gen.ocr_text,
           user_prompt: gen.user_prompt || "（初回生成依頼：初期FB）",
           ai_feedback: gen.ai_feedback,
           action: rev.action || null,
@@ -672,11 +674,11 @@ const reviewAndRefine = {
       data.task_completed = true;
       data.total_turns = generations.length;
       data.followup_count = generations.length - 1;
-      data.ocr_text = selectedTask.ocr_text;
       data.initial_ai_output = generations[0].ai_feedback;
-      data.final_ai_output = currentGen.ai_feedback;
+      data.teacher_final_feedback = teacherFinalDraft.trim();
       data.interaction_history_json = JSON.stringify(structuredHistory);
       data.interaction_history_text = readableHistory;
+      teacherFinalDraft = "";
     }
 
     delete data.response;
