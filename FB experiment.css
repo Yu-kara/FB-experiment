@@ -256,6 +256,26 @@
     height: 100%;
   }
 
+  /* 教師単独条件の案内 */
+  .teacher-only-notice {
+    padding: 1.25rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #334155;
+    line-height: 1.7;
+  }
+  .teacher-only-notice h3 { margin: 0 0 0.7rem; font-size: 1.1rem; }
+  .teacher-only-notice p { margin: 0; }
+  .teacher-only-footer { margin-top: 0.75rem; text-align: right; }
+  .task-condition-label {
+    font-size: 0.8rem;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    padding: 0.15rem 0.4rem;
+  }
+
   /* 作文表示・教師最終FB作成エリア */
   .task-essay-box {
     flex: 0 0 42%;
