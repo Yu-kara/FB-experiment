@@ -241,14 +241,14 @@
     height: calc(100vh - 4.6rem);
   }
   .workspace-left {
-    flex: 0 0 46%;
-    max-width: 46%;
+    flex: 0 0 54%;
+    max-width: 54%;
     min-width: 0;
     display: flex;
     flex-direction: column;
   }
   .workspace-right {
-    flex: 1 1 54%;
+    flex: 1 1 46%;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -256,44 +256,59 @@
     height: 100%;
   }
 
-  /* 課題画像エリア */
-  .task-image-box {
-    margin: 0;
-    text-align: center;
-    background: #f8fafc;
-    padding: 0.65rem;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    height: 100%;
+  /* 作文表示・教師最終FB作成エリア */
+  .task-essay-box {
+    flex: 0 0 42%;
+    min-height: 0;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    justify-content: flex-start;
+    padding: 0.85rem 1rem;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
   }
-  .task-image-box img {
-    width: 100%;
+  .task-essay-heading, .teacher-final-label {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 0.5rem;
+  }
+  .task-essay-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-y: auto;
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(100vh - 6rem);
-    height: auto;
-    display: block;
-    margin: 0 auto;
-    border-radius: 4px;
-    object-fit: contain;
+    text-align: left;
+    line-height: 1.7;
+    color: #0f172a;
   }
-  /* 事前確認画面用の画像高さ調整 */
-  .task-intro-box {
-    height: auto;
-    max-width: 52rem;
-    margin: 0 auto;
+  .task-intro-box { max-width: 52rem; margin: 0 auto; min-height: 250px; }
+  .teacher-final-box {
+    flex: 1 1 58%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0.85rem 1rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    box-sizing: border-box;
+    background: #fff;
   }
-  .task-intro-box img {
-    width: auto;
-    max-width: 100%;
-    max-height: 60vh;
+  .teacher-final-textarea {
+    flex: 1 1 auto;
+    min-height: 120px;
+    width: 100%;
+    resize: vertical;
+    box-sizing: border-box;
+    padding: 0.7rem;
+    border: 1px solid #94a3b8;
+    border-radius: 8px;
+    font: inherit;
+    line-height: 1.6;
   }
 
-  /* ChatGPT風のスクロール可能な対話タイムライン */
   .chat-window-wrapper {
     border: 1px solid #cbd5e1;
     border-radius: 10px;
@@ -413,7 +428,7 @@
   @media (max-width: 860px) {
     .split-workspace, .split-workspace.has-preview-banner { flex-direction: column; height: auto; }
     .workspace-left, .workspace-right { flex: 1 1 100%; max-width: 100%; width: 100%; height: auto; }
-    .task-image-box { height: auto; }
-    .task-image-box img { max-height: 300px; width: auto; }
+    .task-essay-box { flex: none; min-height: 220px; }
+    .teacher-final-box { flex: none; min-height: 300px; }
     .chat-thread-container { height: 340px; }
   }
