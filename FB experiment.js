@@ -874,7 +874,10 @@ const sessionFinish = {
   choices: ["終了"]
 };
 
-const timeline = [consentTimeline, authenticationTimeline, taskMenuLoop, sessionFinish];
+// プレビュー時は認証画面をタイムラインに一切登録しない。
+const timeline = PREVIEW_MODE
+  ? [taskMenuLoop, sessionFinish]
+  : [consentTimeline, authenticationTimeline, taskMenuLoop, sessionFinish];
 
 const surveyStylesheet = document.createElement("link");
 surveyStylesheet.rel = "stylesheet";
