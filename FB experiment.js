@@ -3,7 +3,7 @@
 // true  : APIキーなしで「トップ画面〜AIとの会話画面」の流れを即座に確認できます
 // false : 本番モード（同意確認 → パスワード認証 → トップ画面 → AI対話）で動作します
 // =========================================================================
-const PREVIEW_MODE = false;
+const PREVIEW_MODE = true; // 画面確認後、本番運用前に必ず false に戻す
 
 // Cognition の Source code に貼り付ける jsPsych 8 / Survey 4 のコード（OpenAI API版・課題選択トップ画面付き）
 // External JS: OpenAI APIキーを暗号化した encrypted-api-key.js をアップロードしてください。
@@ -881,18 +881,26 @@ surveyStylesheet.rel = "stylesheet";
 surveyStylesheet.href = "https://unpkg.com/@jspsych/plugin-survey@4.0.0/css/survey.min.css";
 const feedbackUtilsScript = document.createElement("script");
 feedbackUtilsScript.src = "https://cdn.jsdelivr.net/gh/kishiyamat/jspsych-openai-utils@1eb526cda0aad424f3efb4ddb1da926d099f5df1/dist/feedback-utils.js";
-feedbackUtilsScript.onload = () => jsPsych.run(timeline);
-feedbackUtilsScript.onerror = () => {
+// プレビューではOpenAI共通ライブラリが不要。外部JS読込失敗の影響を受けないようにする。
+function startExperiment() {
   if (PREVIEW_MODE) {
     jsPsych.run(timeline);
-  } else {
-    document.body.textContent = "共通ライブラリを読み込めませんでした。ページを再読み込みしてください。";
+    return;
   }
-};
-surveyStylesheet.onload = () => {
+  feedbackUtilsScript.onload = () => jsPsych.run(timeline);
+  feedbackUtilsScript.onerror = () => {
+    document.body.textContent = "共通ライブラリを読み込めませんでした。ページを再読み込みしてください。";
+  };
   document.head.append(feedbackUtilsScript);
-};
+}
+
+surveyStylesheet.onload = startExperiment;
 surveyStylesheet.onerror = () => {
-  document.body.textContent = "Surveyのスタイルを読み込めませんでした。ページを再読み込みしてください。";
+  if (PREVIEW_MODE) {
+    // プレビューは装飾用CSSが取得できなくても画面の機能を確認する。
+    startExperiment();
+  } else {
+    document.body.textContent = "Surveyのスタイルを読み込めませんでした。ページを再読み込みしてください。";
+  }
 };
 document.head.append(surveyStylesheet);
