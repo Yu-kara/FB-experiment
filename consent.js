@@ -5,8 +5,8 @@
 // ★ 「同意する／同意しない」ボタンと同意結果の記録は FB experiment.js が行います。
 window.RESEARCH_CONSENT = {
   html: String.raw`
-<main id="research-consent-content" class="research-consent" data-consent-version="2026-11-26-v2">
-    <h2>研究参加に関する説明と同意</h2>
+<main id="research-consent-content" class="research-consent" data-consent-version="2026-11-26-v2" style="text-align: left !important;">
+    <h2 style="text-align: center;">研究参加に関する説明と同意</h2>
     <p>本研究への参加をご検討いただき、ありがとうございます。以下の説明をお読みいただき、研究への参加についてご判断ください。</p>
 
     <h3>1. 研究実施者・問い合わせ先</h3>
