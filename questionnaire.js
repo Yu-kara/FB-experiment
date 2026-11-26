@@ -51,8 +51,8 @@
         {type:"comment",name:"c2_increased",title:"C2. AIを使用することで負担が増加した作業や、新たに生じた負担があれば、その具体的な内容や理由を記述してください。",rows:4}
       ]},
       {name:"d",title:"D. 参加者の基本情報",elements:[
-        radio("d1_feedback_experience","D1. これまでに英語学習者の英作文に対するフィードバックを作成した経験はどの程度ありますか。（教育実習・教職課程の演習等を含む。回数は概算で構いません。）",experience),
-        radio("d2_ai_experience","D2. これまでに英作文に対するフィードバックの作成に生成AIを使用した経験はどの程度ありますか。（回数は概算で構いません。）",experience),
+        radio("d1_feedback_experience","D1. 今回の実験を除き、これまでに英語学習者の英作文に対するフィードバックを作成した経験はどの程度ありますか。（教育実習・教職課程の演習等を含む。回数は概算で構いません。）",experience),
+        radio("d2_ai_experience","D2. 今回の実験を除き、これまでに英作文に対するフィードバックの作成に生成AIを使用した経験はどの程度ありますか。（回数は概算で構いません。）",experience),
         {type:"checkbox",name:"qualification_types",title:"D3. 保有している英語資格・検定試験をすべて選択してください。過去に取得した資格も含みます。",choices:qualificationChoices,showNoneItem:true,noneText:"保有していない",showSelectAllItem:false},
         select("eiken_grade","英検：最も高い合格級",[{value:"grade1",text:"1級"},{value:"pre1",text:"準1級"},{value:"grade2",text:"2級"},{value:"pre2plus",text:"準2級プラス"},{value:"pre2",text:"準2級"},{value:"grade3",text:"3級"},{value:"other",text:"4級・5級・不明"}],"eiken"),
         number("toefl_old_score","TOEFL iBT：旧尺度の総合スコア（0～120点）",0,120,1,"toefl_old"),
