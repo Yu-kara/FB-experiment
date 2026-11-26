@@ -23,7 +23,9 @@ flowchart TD
     H --> I
     I --> J[協働条件は対話ログも保存]
     J --> C
-    C -->|実験終了| K[終了]
+    C -->|2課題完了後にアンケートへ進む| L[任意回答のアンケート]
+    L --> K[終了]
+    C -->|未完了で中止| K
 ```
 
 同じ課題を再実施すると前回の対話履歴と教師の最終FB草稿は引き継がれず、新しい試行として記録されます。
@@ -39,6 +41,7 @@ flowchart TD
 | `FB experiment.js` | Cognition.run の Source code に設定する実験本体 |
 | `FB experiment.css` | Cognition.run の External CSS に登録する画面スタイル |
 | `consent.js` | **External JSに登録する**研究説明・同意確認本文（研究者情報はここで編集する） |
+| `questionnaire.js` | **External JSに登録する**教員負担アンケート・回答の集計用符号化・CEFR換算 |
 
 画像・OCRは使用しません。研究者が作成した作文の**同じテキスト**を、教師にはHTMLで表示し、AIにはAPI入力として送信します。
 
@@ -64,7 +67,7 @@ flowchart TD
 1. `FB experiment.js` の内容を **Source code** に設定します。
 2. `FB experiment.css` を **External CSS** に設定します。JSだけでは実験画面のスタイルは適用されません。
 3. `survey`、`html-button-response`、`call-function` の各jsPsychプラグインを有効にします。
-4. **`consent.js`をExternal JSに登録**します。プレビューモードでも必須です。
+4. **`consent.js` と `questionnaire.js` をExternal JSに登録**します。プレビューモードでも必須です。GitHubで編集した場合はCognition.run側へ再登録してください。
 5. 本番用には暗号化APIキーの`encrypted-api-key.js`も**External JS**に登録します。平文のAPIキーや認証用パスワードをリポジトリにコミットしないでください。
 6. `ESSAYS`に作文2本を登録し、`consent.js`に研究実施者・所属・指導教員・連絡先を記入したうえで動作確認します。
 
@@ -114,7 +117,7 @@ const SETTINGS = {
 
 | 項目 | 定義 |
 | --- | --- |
-| `participant_id` | 研究者が事前に発行する参加教師のID。後日アンケートとの紐付けにも使用 |
+| `participant_id` | 研究者が事前に発行する参加教師のID。実験終了時アンケートとの紐付けにも使用 |
 | `session_id` | 実験ページの実行セッションを識別 |
 | `task_id` | 条件と作文の組み合わせを表すID（例：`teacher_only_essay_1`） |
 | `task_order` | 実施した課題が参加者内で何番目か（1または2。再実施は元の番号を維持） |
@@ -145,6 +148,54 @@ jsPsychの各試行は `feedback_phase` で識別できます（例：`consent`�
 
 これらはコード上の保存フィールドの説明です。Cognition.runでの実際のデータ出力・エクスポートについては本番テストで検証してください。
 
+## 教員負担アンケート
+
+`questionnaire.js` を External JS として登録すると、両条件の課題が完了して課題メニューから「アンケートへ進む」を選択したとき、1回だけアンケートを表示します。未完了で終了する場合や同意拒否・認証失敗では表示しません。プレビューでは表示されますが、研究データに含めません。すべての質問は任意回答で、回答内容はAIへ送信しません。実験本体の作業時間はFB確定時点で記録され、アンケート回答時間は別に保存します。
+
+- A：教師単独条件と比較したAI協働条件の負担変化（7問、A7は全体）。1=大幅に減少、4=変化なし、7=大幅に増加。
+- B：AI協働特有の負担（3問）。1=全く負担なし、7=非常に大きな負担。
+- C：負担の軽減・増加に関する自由記述（2問）。
+- D：今回の実験以前の英作文FB経験・生成AI使用経験・保有英語資格（3問。資格別の条件付き追加入力あり）。
+
+A・Bの合計得点は算出しません。Aは直接比較による主観評価であり、条件ごとの独立評定ではありません。項目は独自作成であり、妥当性の検証および予備調査が必要です。Dは属性記述用です。
+
+### 保存データ
+
+アンケートのレコードは `feedback_phase: "workload_questionnaire"` で識別できます。参加者ID・セッションIDに加え、両条件の最新の完了試行の `*_attempt_uid`・`*_essay_id`・`*_task_order` と完了試行数 `*_completed_attempt_count` を保存します。再実施があった場合は直近の完了試行に紐付けますが、アンケートが複数回の経験を反映する可能性があるため分析時に注意してください。
+
+| 項目 | 内容 |
+| --- | --- |
+| `questionnaire_version` / `cefr_mapping_version` | 質問項目・換算基準の版 |
+| `a1_error_detection` ～ `a7_overall` | Aの各項目、1～7またはnull |
+| `a*_change` | Aの各項目を-3～+3へ再符号化、欠損はnull |
+| `b1_reading_ai` ～ `b3_prompting` | Bの各項目、1～7またはnull |
+| `*_status` | answered / not_applicable / unanswered |
+| `c1_reduced` / `c2_increased` | 自由記述 |
+| `d1_feedback_experience` / `d2_ai_experience` | 1=0回、2=1～2回、3=3～5回、4=6～10回、5=11回以上、unknown=不明・回答しない |
+| `qualification_types` / `qualification_answers` | 資格種別・回答原値 |
+| `cefr_level` / `cefr_sources` / `cefr_candidates` | CEFR相当ラベル、採用根拠、換算候補 |
+| `toeic_skill_cefr` | TOEIC技能別の換算結果（入力がある場合） |
+| `questionnaire_duration_ms` | 回答時間（Surveyのrt） |
+| `questionnaire_preview` | プレビューかどうか |
+| `response` | Surveyの元回答 |
+
+### CEFRラベリング
+
+属性記述のみを目的とし、自己評価は求めません。回答された資格・スコアから決定論的に換算します。4技能の総合資格を優先し、複数ある場合は最高のCEFR相当レベルを採用します。TOEICは総合資格が換算できない場合に限り、4技能すべての技能別換算が可能なら最も低い技能のレベルを保守的な研究用ラベルとして使用します（公式の総合CEFRではありません）。L&Rのみ、その他資格、未回答、換算表外のスコアは原値を残し、他に換算可能な資格がなければUnknownとします。取得時期は限定しないため、現在の英語力の実測値ではありません。
+
+換算表（2026-11-26時点の研究用設定）：
+- 英検合格級：3級 A1、準2級・準2級プラス A2、2級 B1、準1級 B2、1級 C1。級による代表ラベルであり、CSEスコアの個別算出ではありません。
+- TOEFL iBT 旧尺度：42 B1、72 B2、95 C1、114 C2（各下限）。
+- TOEFL iBT 新尺度：1 A1、2 A2、3 B1、4 B2、5 C1、6 C2（各下限）。
+- IELTS：4 B1、5.5 B2、7 C1、8.5 C2（各下限、概算対応）。
+- TEAP：135 A2、225 B1、309 B2、375 C1（各下限）。
+- TEAP CBT：235 A2、420 B1、600 B2、800 C1（各下限）。
+- TOEIC：技能別のETS公表下限を使用。4技能の最小レベルは本研究独自の保守的な規則。
+
+出典：[英検協会の対照表](https://www.eiken.or.jp/ielts/merit/index.html)、[ETS旧TOEFL対照表](https://www.in.ets.org/toefl/score-users/ibt/compare-scores.html)、[ETS新TOEFL対照表](https://www.ets.org/toefl/institutions/ibt/score-scale-update.html)、[IELTS公式CEFR対応](https://ielts.org/organisations/ielts-for-organisations/compare-ielts/ielts-and-the-cefr)、[IIBC TOEIC対照表](https://www.iibc-global.org/toeic/official_data/toeic_cefr.html)、[ETS TOEIC技能別対照表](https://www.ets.org/pdfs/toeic/toeic-mapping-cefr-reference.pdf)。
+
+質問内容や換算ルールを変更する場合は `questionnaire.js` の版も更新してください。アンケートの内容・収集項目を変更した場合は同意文の更新も検討してください。
+
 ## 動作確認チェックリスト
 
 - [ ] `consent.js` に大学・所属、研究実施者、指導教員、問い合わせ先メールアドレスを記入した
@@ -166,7 +217,9 @@ jsPsychの各試行は `feedback_phase` で識別できます（例：`consent`�
 - [ ] 最終FBが空欄のままでは完了できず、入力後は完了できた
 - [ ] `teacher_final_feedback` と対話ログが正しく保存された
 - [ ] 同じ課題を再実施しても、前回の履歴が混入しなかった
-- [ ] 参加者IDで後日アンケートの回答を紐付けられた
+- [ ] 2課題完了後に1回だけアンケートが表示され、未完了・同意拒否時には表示されない
+- [ ] アンケートの未回答・該当なし・資格スコア・CEFRラベル・両条件の試行IDが正しく出力された
+- [ ] アンケート回答時間がFB作成時間に加算されない
 - [ ] 本番データのエクスポートとIDの整合性を確認した
 
 ## 研究データの取り扱い
