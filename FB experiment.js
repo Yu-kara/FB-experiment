@@ -6,7 +6,7 @@
 const PREVIEW_MODE = true; // 画面確認後、本番運用前に必ず false に戻す
 
 // Cognition の Source code に貼り付ける jsPsych 8 / Survey 4 のコード（OpenAI API版・課題選択トップ画面付き）
-// External JS: consent.js（同意画面用、プレビューでも必須）と、encrypted-api-key.js（本番用）を登録してください。
+// External JS: consent.js、questionnaire.js（同意・アンケート用、プレビューでも必須）、encrypted-api-key.js（本番用）を登録してください。
 // External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
 // ESSAYS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
@@ -340,7 +340,7 @@ const taskMenu = {
 
         <div class="menu-footer">
           <span class="menu-progress-text">完了状況: ${completedTaskIds.size} / ${REQUIRED_TASK_COUNT} 課題</span>
-          <button type="button" id="btn-menu-exit" class="menu-finish-btn">すべての実験を終了する</button>
+          <button type="button" id="btn-menu-exit" class="menu-finish-btn">${completedTaskIds.size >= REQUIRED_TASK_COUNT ? "アンケートへ進む" : "すべての実験を終了する"}</button>
         </div>
       </div>
     `;
@@ -406,7 +406,7 @@ const taskMenu = {
           const remaining = REQUIRED_TASK_COUNT - completedTaskIds.size;
           const confirmMsg = remaining > 0
             ? `まだ未実施の課題が ${remaining} 件あります。実験を終了してもよろしいですか？`
-            : "すべての実験を終了しますか？";
+            : "アンケートへ進みますか？（回答は任意です）";
           if (!window.confirm(confirmMsg)) return;
 
           const currentId = idInput ? idInput.value.trim() : participantId;
@@ -925,7 +925,33 @@ const taskMenuLoop = {
   }
 };
 
-// 8. 終了画面
+// 8. 両課題の完了後に1回だけアンケートを実施する。
+// 質問項目・採点・CEFR換算は External JS (questionnaire.js) で管理する。
+function questionnaireContext() {
+  const rows = jsPsych.data.get().filter({ task_completed: true }).values();
+  const context = { participant_id: participantId, questionnaire_preview: PREVIEW_MODE };
+  for (const condition of ["teacher_only", "collaborative"]) {
+    const matching = rows.filter(row => row.condition === condition);
+    const last = matching[matching.length - 1];
+    context[condition + "_attempt_uid"] = last?.attempt_uid ?? null;
+    context[condition + "_essay_id"] = last?.essay_id ?? null;
+    context[condition + "_task_order"] = last?.task_order ?? null;
+    context[condition + "_completed_attempt_count"] = matching.length;
+  }
+  return context;
+}
+const postTaskQuestionnaire = {
+  timeline: [],
+  conditional_function: () => {
+    const consentRow = jsPsych.data.get().filter({ feedback_phase: "consent" }).last(1).values()[0];
+    if (!consentRow || consentRow.response !== 0 || completedTaskIds.size !== REQUIRED_TASK_COUNT) return false;
+    if (PREVIEW_MODE) return true;
+    const authRow = jsPsych.data.get().filter({ feedback_phase: "authentication" }).last(1).values()[0];
+    return Boolean(authRow && authRow.authentication_succeeded);
+  }
+};
+
+// 9. 終了画面
 const sessionFinish = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "session_end" },
@@ -948,8 +974,8 @@ const sessionFinish = {
 
 // プレビューでも同意画面を確認できる。認証とAPI通信だけをスキップする。
 const timeline = PREVIEW_MODE
-  ? [consentTimeline, taskMenuLoop, sessionFinish]
-  : [consentTimeline, authenticationTimeline, taskMenuLoop, sessionFinish];
+  ? [consentTimeline, taskMenuLoop, postTaskQuestionnaire, sessionFinish]
+  : [consentTimeline, authenticationTimeline, taskMenuLoop, postTaskQuestionnaire, sessionFinish];
 
 const surveyStylesheet = document.createElement("link");
 surveyStylesheet.rel = "stylesheet";
@@ -962,6 +988,18 @@ function startExperiment() {
     loadConsentFromExternalJS();
   } catch (error) {
     document.body.textContent = "研究参加説明を読み込めませんでした。実験担当者に連絡してください。詳細: " + error.message;
+    return;
+  }
+  try {
+    if (typeof window.FB_QUESTIONNAIRE?.buildTrial !== "function") {
+      throw new Error("questionnaire.js を External JS に登録してください。");
+    }
+    postTaskQuestionnaire.timeline = [window.FB_QUESTIONNAIRE.buildTrial({
+      surveyPlugin: jsPsychSurvey,
+      getContext: questionnaireContext
+    })];
+  } catch (error) {
+    document.body.textContent = "アンケートを読み込めませんでした。実験担当者に連絡してください。詳細: " + error.message;
     return;
   }
   if (PREVIEW_MODE) {
