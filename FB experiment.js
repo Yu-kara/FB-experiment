@@ -6,11 +6,11 @@
 const PREVIEW_MODE = true; // 画面確認後、本番運用前に必ず false に戻す
 
 // Cognition の Source code に貼り付ける jsPsych 8 / Survey 4 のコード（OpenAI API版・課題選択トップ画面付き）
-// External JS: OpenAI APIキーを暗号化した encrypted-api-key.js をアップロードしてください。
+// External JS: consent.js（同意画面用、プレビューでも必須）と、encrypted-api-key.js（本番用）を登録してください。
 // External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
 // ESSAYS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
-// consent.html: 本番前に研究実施者の所属・氏名・指導教員・連絡先を入力してください。
+// consent.js: 本番前に研究実施者の所属・氏名・指導教員・連絡先を入力してください。
 
 // ① 初期FBは表層的な誤りを優先し、後続対話は教師の指示に柔軟に対応
 const SYSTEM_PROMPT = `あなたは教員の文章指導を支援するAIです。
@@ -54,44 +54,37 @@ function isTaskSelectable(task) {
   return !completed.some(t => t.condition === task.condition || t.essay_id === task.essay_id);
 }
 
-// 研究説明は consent.html に分離。起動前にHTMLを読み込み、取得失敗時は実験を停止する。
-const CONSENT_HTML_SOURCES = [
-  "https://raw.githubusercontent.com/Yu-kara/FB-experiment/main/consent.html",
-  "https://cdn.jsdelivr.net/gh/Yu-kara/FB-experiment@main/consent.html"
-];
+// 同意文はCognition.runの External JS に登録した consent.js から取得する。
+// 外部JSが未登録・壊れている場合、同意なしに実験が進まないようにする。
 let consentHtml = "";
 let consentVersion = null;
 
-async function loadConsentHtml() {
-  let lastError = null;
-  for (const sourceUrl of CONSENT_HTML_SOURCES) {
-    try {
-      const response = await fetch(sourceUrl + "?t=" + Date.now(), { cache: "no-store" });
-      if (!response.ok) throw new Error("HTTP " + response.status);
-      const parsed = new DOMParser().parseFromString(await response.text(), "text/html");
-      const main = parsed.querySelector("#research-consent-content");
-      if (!main || !main.textContent.trim()) throw new Error("説明文が見つかりません");
-      if (!PREVIEW_MODE && main.textContent.includes("【")) {
-        throw new Error("研究者情報が未入力です。consent.html の【...】を編集してください。");
-      }
-      const version = main.getAttribute("data-consent-version");
-      if (!version) throw new Error("同意文書の版が未設定です");
-      // GitHubのHTMLを挿入する際、スクリプトやイベント属性を除外
-      main.querySelectorAll("script,iframe,object,embed,form,input,button,style,link,base").forEach(el => el.remove());
-      main.querySelectorAll("*").forEach(el => {
-        Array.from(el.attributes).forEach(attr => {
-          if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
-          if ((attr.name === "href" || attr.name === "src") && !/^(https:\/\/|#)/i.test(attr.value)) el.removeAttribute(attr.name);
-        });
-      });
-      consentHtml = main.outerHTML;
-      consentVersion = version;
-      return;
-    } catch (error) {
-      lastError = error;
-    }
+function loadConsentFromExternalJS() {
+  const source = window.RESEARCH_CONSENT;
+  if (!source || typeof source.html !== "string" || !source.html.trim()) {
+    throw new Error("External JSにconsent.jsが登録されていないか、正しく読み込めていません。");
   }
-  throw new Error("consent.htmlを読み込めませんでした: " + (lastError?.message || "原因不明"));
+  const parsed = new DOMParser().parseFromString(source.html, "text/html");
+  const main = parsed.querySelector("#research-consent-content");
+  if (!main || !main.textContent.trim()) {
+    throw new Error("consent.jsに研究説明文が見つかりません。");
+  }
+  if (!PREVIEW_MODE && main.textContent.includes("【")) {
+    throw new Error("研究者情報が未入力です。consent.jsの【...】を編集してください。");
+  }
+  const version = main.getAttribute("data-consent-version");
+  if (!version) throw new Error("consent.jsのdata-consent-versionが未設定です。");
+  // 表示本文にスクリプトやイベント属性を含めない
+  main.querySelectorAll("script,iframe,object,embed,form,input,button,style,link,base").forEach(el => el.remove());
+  main.querySelectorAll("*").forEach(el => {
+    Array.from(el.attributes).forEach(attr => {
+      if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+      if ((attr.name === "href" || attr.name === "src") &&
+          !/^(https:\/\/|#)/i.test(attr.value)) el.removeAttribute(attr.name);
+    });
+  });
+  consentHtml = main.outerHTML;
+  consentVersion = version;
 }
 
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
@@ -213,7 +206,7 @@ function scrollToLatestMessage() {
   }, 60);
 }
 
-// 1. 研究参加の説明と同意確認（本文は別ファイル consent.html から取得）
+// 1. 研究参加の説明と同意確認（本文は External JS の consent.js から取得）
 const consent = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "consent" },
@@ -963,10 +956,10 @@ surveyStylesheet.rel = "stylesheet";
 surveyStylesheet.href = "https://unpkg.com/@jspsych/plugin-survey@4.0.0/css/survey.min.css";
 const feedbackUtilsScript = document.createElement("script");
 feedbackUtilsScript.src = "https://cdn.jsdelivr.net/gh/kishiyamat/jspsych-openai-utils@1eb526cda0aad424f3efb4ddb1da926d099f5df1/dist/feedback-utils.js";
-// 研究説明を必ず先に読み込む。失敗した場合、同意画面なしで実験を開始しない。
-async function startExperiment() {
+// External JSの同意文を読み込めない場合、同意画面なしで実験を開始しない。
+function startExperiment() {
   try {
-    await loadConsentHtml();
+    loadConsentFromExternalJS();
   } catch (error) {
     document.body.textContent = "研究参加説明を読み込めませんでした。実験担当者に連絡してください。詳細: " + error.message;
     return;
