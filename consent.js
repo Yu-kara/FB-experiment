@@ -15,7 +15,7 @@ window.RESEARCH_CONSENT = {
       <strong>研究実施者：</strong>大濱 悠<br>
       <strong>所属：</strong>法政大学・文学部・英文学科<br>
       <strong>指導教員：</strong>【指導教員氏名】<br>
-      <strong>連絡先：</strong>yu.ohama.5a(at)stu.hosei.ac.jp
+      <strong>連絡先：</strong>yu.ohama.5a(at)stu.hosei.ac.jp ※ (at) は @ に置き換えて下さい．
     </p>
     <!-- ▲ 研究者が編集する項目 ▲ -->
     <p>本研究は、指導教員による研究計画の確認のもとで実施します。</p>
