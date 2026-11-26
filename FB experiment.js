@@ -9,7 +9,8 @@ const PREVIEW_MODE = true; // 画面確認後、本番運用前に必ず false �
 // External JS: OpenAI APIキーを暗号化した encrypted-api-key.js をアップロードしてください。
 // External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
-// TASKS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
+// ESSAYS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
+// RESEARCH_INFO: 本番前に研究実施者の所属・氏名・指導教員・連絡先を設定してください。
 
 // ① 初期FBは表層的な誤りを優先し、後続対話は教師の指示に柔軟に対応
 const SYSTEM_PROMPT = `あなたは教員の文章指導を支援するAIです。
@@ -52,6 +53,14 @@ function isTaskSelectable(task) {
   const completed = TASKS.filter(t => completedTaskIds.has(t.task_id));
   return !completed.some(t => t.condition === task.condition || t.essay_id === task.essay_id);
 }
+
+// 研究参加説明と問い合わせ先（研究者情報は実験公開前に必ず設定する）
+const RESEARCH_INFO = {
+  institution: "【所属大学・研究科を入力】",
+  researcher: "【研究実施者の氏名を入力】",
+  supervisor: "【指導教員の氏名を入力】",
+  email: "【連絡先メールアドレスを入力】"
+};
 
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
 
@@ -172,14 +181,64 @@ function scrollToLatestMessage() {
   }, 60);
 }
 
-// 1. 同意確認（本番モードのみ）
+// 1. 研究参加の説明と同意確認（プレビューにも表示し内容確認を可能にする）
 const consent = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "consent" },
-  stimulus: `<p>作文へのフィードバックを作成する実験です（全${TASKS.length}課題）。</p>
-    <p>教師単独FBではAIを使わず、AI・教師協働FBではAIの支援を参考にして、教師が最終フィードバックを作成してください。</p>
-    <p>AIとのすべてのやり取り・操作ログを記録します。個人情報は入力しないでください。</p>`,
-  choices: ["同意する", "同意しない"]
+  stimulus: () => `
+    <section class="research-consent">
+      <h2>研究参加に関する説明と同意</h2>
+      ${PREVIEW_MODE ? '<p class="preview-banner">【プレビュー】同意画面の確認用です。研究データの収集・AI通信は行いません。</p>' : ''}
+      <p>以下の説明をお読みいただき、研究への参加について選択してください。</p>
+
+      <h3>研究実施者・問い合わせ先</h3>
+      <p>所属：${escapeHtml(RESEARCH_INFO.institution)}<br>
+      研究実施者：${escapeHtml(RESEARCH_INFO.researcher)}<br>
+      指導教員：${escapeHtml(RESEARCH_INFO.supervisor)}<br>
+      連絡先：${escapeHtml(RESEARCH_INFO.email)}</p>
+      <p>本研究は指導教員による研究計画の確認のもとで実施します。</p>
+
+      <h3>研究目的と実験内容</h3>
+      <p>生成AIによる支援が、教師による英語ライティング・フィードバックの質や作成時間に与える影響を検討します。
+      教師単独FB条件とAI・教師協働FB条件で各1課題、計2課題に取り組みます。
+      いずれの条件でも、最終フィードバックは参加者自身が作成します。</p>
+
+      <h3>参加の自由と中止</h3>
+      <p>研究への参加は任意です。同意しない場合や参加途中で中止した場合も、不利益はありません。
+      本研究の結果を参加者個人の勤務評価や能力判定に使用することはありません。</p>
+
+      <h3>収集するデータと利用目的</h3>
+      <p>研究用参加者ID、対象作文・実施条件・実施順序、最終フィードバック、作業時間、およびAI・教師協働条件におけるAIの応答と対話履歴を記録します。
+      研究目的に限って分析し、論文等では個人が特定されない形で成果を公表します。</p>
+
+      <h3>データの保管・廃棄</h3>
+      <p>研究者が管理する研究データはアクセス権限を制限して保管し、原則として研究実施者と指導教員のみが閲覧します。
+      <strong>論文公表後5年間</strong>保存し、期間終了後に研究者が管理するデータを削除します。
+      Cognition.runおよび外部AIサービスに保存される情報には、各サービス固有の保存・削除ルールが適用されます。</p>
+
+      <h3>同意撤回・データ削除の申し出</h3>
+      <p><strong>同意はいつでも撤回できます。</strong>撤回の申し出に期限は設けません。
+      撤回や研究データの削除を希望する場合は、上記連絡先へ参加者IDを添えてご連絡ください。
+      研究者が保管しており個別に識別できるデータについては、申し出を受けて研究利用を中止し、削除します。
+      ただし、すでに公表した集計結果、個人と対応付けられなくなったデータ、すでに削除済みのデータは個別の取り消し・削除ができない場合があります。
+      外部サービス上の記録・バックアップは、サービスの規定に従って処理されるため、即時の消去を保証できません。</p>
+
+      <h3>外部サービスへの情報送信</h3>
+      <p>実験データの収集にはCognition.runを利用します。
+      AI・教師協働FB条件では、研究者が用意した架空の作文と参加者がAIに入力した指示・対話内容がOpenAI APIに送信されます。
+      個人情報や機密情報を入力しないでください。OpenAI APIは通常、サービスの安全性を維持する目的で、入力内容等を含み得るログを原則30日以内保存します（例外がある場合があります）。</p>
+      <p class="research-consent-links">
+        <a href="https://www.cognition.run/privacy" target="_blank" rel="noopener noreferrer">Cognition.runのプライバシーポリシー</a> ／
+        <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">OpenAI APIのデータ取扱い</a>
+      </p>
+
+      <p><strong>以上の内容を確認し、以下から意思を選択してください。</strong></p>
+    </section>`,
+  choices: ["説明を理解し、研究参加に同意する", "同意しない"],
+  on_finish: data => {
+    data.consent_given = data.response === 0;
+    data.consent_version = "2026-11-26";
+  }
 };
 
 // 2. パスワード入力（本番モードのみ）
@@ -230,8 +289,7 @@ const authenticationTimeline = {
 };
 
 const consentTimeline = {
-  timeline: [consent],
-  conditional_function: () => !PREVIEW_MODE
+  timeline: [consent]
 };
 
 // 4. トップ画面（実験参加者 識別NO入力 ＋ 課題選択メニュー）
@@ -882,9 +940,9 @@ const taskMenuLoop = {
   timeline: [taskMenu, runSelectedTaskTimeline],
   loop_function: () => !shouldExitSession,
   conditional_function: () => {
-    if (PREVIEW_MODE) return true;
     const consentRow = jsPsych.data.get().filter({ feedback_phase: "consent" }).last(1).values()[0];
     if (!consentRow || consentRow.response !== 0) return false;
+    if (PREVIEW_MODE) return true;
     const authRow = jsPsych.data.get().filter({ feedback_phase: "authentication" }).last(1).values()[0];
     return Boolean(authRow && authRow.authentication_succeeded);
   }
@@ -895,12 +953,12 @@ const sessionFinish = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "session_end" },
   stimulus: () => {
+    const consentRow = jsPsych.data.get().filter({ feedback_phase: "consent" }).last(1).values()[0];
+    if (!consentRow || consentRow.response !== 0) return "<p>研究参加に同意されなかったため、実験を終了しました。</p>";
     if (PREVIEW_MODE) {
       return `<p>プレビュー表示の確認が完了しました（参加者ID: ${escapeHtml(participantId || "未入力")}）。</p>
         <p style="font-size:0.9rem; color:#475569;">本番で実験を行う際は、コード先頭の <code>const PREVIEW_MODE = false;</code> に変更してください。</p>`;
     }
-    const consentRow = jsPsych.data.get().filter({ feedback_phase: "consent" }).last(1).values()[0];
-    if (consentRow.response !== 0) return "<p>実験を終了します。</p>";
     const auth = jsPsych.data.get().filter({ feedback_phase: "authentication" }).last(1).values()[0];
     if (!auth || !auth.authentication_succeeded) {
       const reason = auth?.authentication_error || auth?.error || "パスワードが違うか、APIキーの復号に失敗しました。";
@@ -911,9 +969,9 @@ const sessionFinish = {
   choices: ["終了"]
 };
 
-// プレビュー時は認証画面をタイムラインに一切登録しない。
+// プレビューでも同意画面を確認できる。認証とAPI通信だけをスキップする。
 const timeline = PREVIEW_MODE
-  ? [taskMenuLoop, sessionFinish]
+  ? [consentTimeline, taskMenuLoop, sessionFinish]
   : [consentTimeline, authenticationTimeline, taskMenuLoop, sessionFinish];
 
 const surveyStylesheet = document.createElement("link");
