@@ -121,6 +121,21 @@
     color: #1e293b;
     margin: 0 0 0.65rem 0;
   }
+  .task-condition-group { margin-top: 1rem; }
+  .task-condition-heading {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #23395d;
+    margin: 0 0 0.65rem;
+  }
+  .task-start-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .task-card:has(.task-start-btn:disabled) {
+    background: #f8fafc;
+    opacity: 0.7;
+  }
   .task-card-list {
     display: flex;
     flex-direction: column;
