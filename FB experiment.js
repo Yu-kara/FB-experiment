@@ -32,9 +32,7 @@ const SETTINGS = {
 // 課題ごとに研究者が作成した作文を設定する（同じessay_textを教師画面とAIで使用）
 const TASKS = [
   { task_id: "task_1", task_label: "課題 1", essay_id: "essay_1", condition: "teacher_only", essay_text: null },
-  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", condition: "collaborative", essay_text: null },
-  { task_id: "task_3", task_label: "課題 3", essay_id: "essay_3", condition: "teacher_only", essay_text: null },
-  { task_id: "task_4", task_label: "課題 4", essay_id: "essay_4", condition: "collaborative", essay_text: null }
+  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", condition: "collaborative", essay_text: null }
 ];
 
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
