@@ -29,11 +29,29 @@ const SETTINGS = {
   maxOutputTokens: 8000
 };
 
-// 課題ごとに研究者が作成した作文を設定する（同じessay_textを教師画面とAIで使用）
-const TASKS = [
-  { task_id: "task_1", task_label: "課題 1", essay_id: "essay_1", condition: "teacher_only", essay_text: null },
-  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", condition: "collaborative", essay_text: null }
+// 作文は2本のみ。条件×作文の4通りから参加者に指示された組み合わせを選択する。
+// 本番前に各essay_textを登録する。プレビューでは共通のダミー英文を表示する。
+const ESSAYS = [
+  { essay_id: "essay_1", task_label: "作文1", essay_text: null },
+  { essay_id: "essay_2", task_label: "作文2", essay_text: null }
 ];
+const CONDITIONS = [
+  { condition: "teacher_only", label: "教師単独FB" },
+  { condition: "collaborative", label: "AI・教師協働FB" }
+];
+const TASKS = CONDITIONS.flatMap(group => ESSAYS.map(essay => ({
+  ...essay,
+  condition: group.condition,
+  task_id: `${group.condition}_${essay.essay_id}`
+})));
+const REQUIRED_TASK_COUNT = CONDITIONS.length; // 一人につき各条件1課題、計2課題
+
+function isTaskSelectable(task) {
+  // 完了済みの同一組み合わせのみ再実施可能（別条件との作文重複を防止）
+  if (completedTaskIds.has(task.task_id)) return true;
+  const completed = TASKS.filter(t => completedTaskIds.has(t.task_id));
+  return !completed.some(t => t.condition === task.condition || t.essay_id === task.essay_id);
+}
 
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
 
@@ -48,6 +66,8 @@ const sessionId = (typeof crypto !== "undefined" && typeof crypto.randomUUID ===
   : `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 let shouldExitSession = false;
 const completedTaskIds = new Set();
+const completedTaskOrders = new Map();
+let currentTaskOrder = null;
 
 let pendingReviewAction = null;
 let pendingFollowupText = null;
@@ -233,25 +253,31 @@ const taskMenu = {
       ? `<div class="preview-banner">【デザイン確認用プレビューモード】API通信は行われません（本番時は PREVIEW_MODE = false に戻してください）</div>`
       : "";
 
-    const taskCardsHtml = TASKS.map((task, index) => {
-      const isDone = completedTaskIds.has(task.task_id);
-      const cardClass = isDone ? "task-card is-done" : "task-card";
-      const badgeHtml = isDone
-        ? `<span class="task-status-badge done">実施済み</span>`
-        : `<span class="task-status-badge pending">未実施</span>`;
-      const btnText = isDone ? "もう一度開く" : "この課題を開始";
-      const conditionLabel = task.condition === "teacher_only" ? "教師単独FB" : "AI・教師協働FB";
-
-      return `
-        <div class="${cardClass}">
-          <div class="task-card-info">
-            <span class="task-card-title">${escapeHtml(task.task_label)}</span>
-            <span class="task-condition-label">${conditionLabel}</span>
-            ${badgeHtml}
-          </div>
-          <button type="button" class="task-start-btn" data-task-index="${index}">${btnText}</button>
-        </div>
-      `;
+    const taskCardsHtml = CONDITIONS.map(group => {
+      const cards = TASKS.map((task, index) => ({ task, index }))
+        .filter(({ task }) => task.condition === group.condition)
+        .map(({ task, index }) => {
+          const isDone = completedTaskIds.has(task.task_id);
+          const canSelect = isTaskSelectable(task);
+          const cardClass = isDone ? "task-card is-done" : "task-card";
+          const badgeHtml = isDone
+            ? `<span class="task-status-badge done">実施済み</span>`
+            : canSelect ? `<span class="task-status-badge pending">未実施</span>`
+              : `<span class="task-status-badge pending">選択不可</span>`;
+          const btnText = isDone ? "もう一度開く" : "この作文で開始";
+          return `
+            <div class="${cardClass}">
+              <div class="task-card-info">
+                <span class="task-card-title">${escapeHtml(task.task_label)}</span>
+                ${badgeHtml}
+              </div>
+              <button type="button" class="task-start-btn" data-task-index="${index}" ${canSelect ? "" : "disabled"}>${btnText}</button>
+            </div>`;
+        }).join("");
+      return `<section class="task-condition-group">
+        <h3 class="task-condition-heading">${escapeHtml(group.label)}</h3>
+        <div class="task-card-list">${cards}</div>
+      </section>`;
     }).join("");
 
     survey.getQuestionByName("menu_view").html = `
@@ -259,7 +285,7 @@ const taskMenu = {
       <div class="menu-container">
         <div class="menu-header">
           <h2 class="menu-title">課題選択メニュー</h2>
-          <p class="menu-subtitle">実験参加者 識別NOを入力し、実施する課題を選択してください。</p>
+          <p class="menu-subtitle">研究者から指定された順序で、教師単独FB・AI協働FBの各1課題を選択してください。作文1・2は重複して使用できません。</p>
         </div>
 
         <div class="participant-id-box">
@@ -278,7 +304,7 @@ const taskMenu = {
         </div>
 
         <div class="menu-footer">
-          <span class="menu-progress-text">完了状況: ${completedTaskIds.size} / ${TASKS.length} 課題</span>
+          <span class="menu-progress-text">完了状況: ${completedTaskIds.size} / ${REQUIRED_TASK_COUNT} 課題</span>
           <button type="button" id="btn-menu-exit" class="menu-finish-btn">すべての実験を終了する</button>
         </div>
       </div>
@@ -314,6 +340,10 @@ const taskMenu = {
           }
           const taskIndex = Number(btn.getAttribute("data-task-index"));
           const nextTask = TASKS[taskIndex];
+          if (!nextTask || !isTaskSelectable(nextTask)) {
+            window.alert("各条件1課題ずつ、作文1・2を重複せず選択してください。");
+            return;
+          }
           if (!PREVIEW_MODE && !(typeof nextTask.essay_text === "string" && nextTask.essay_text.trim())) {
             window.alert("この課題の作文が未設定です。研究者がTASKSのessay_textを設定してください。");
             return;
@@ -323,6 +353,7 @@ const taskMenu = {
             jsPsych.data.addProperties({ participant_id: participantId });
           }
           selectedTask = nextTask;
+          currentTaskOrder = completedTaskOrders.get(nextTask.task_id) || completedTaskIds.size + 1;
           teacherFinalDraft = "";
           taskStartedAt = new Date().toISOString();
           currentAttemptId += 1;
@@ -337,7 +368,7 @@ const taskMenu = {
       if (exitButton && !exitButton.dataset.bound) {
         exitButton.dataset.bound = "1";
         exitButton.addEventListener("click", () => {
-          const remaining = TASKS.length - completedTaskIds.size;
+          const remaining = REQUIRED_TASK_COUNT - completedTaskIds.size;
           const confirmMsg = remaining > 0
             ? `まだ未実施の課題が ${remaining} 件あります。実験を終了してもよろしいですか？`
             : "すべての実験を終了しますか？";
@@ -363,6 +394,8 @@ const taskMenu = {
     data.menu_action = shouldExitSession ? "exit_experiment" : "select_task";
     data.selected_task_id = selectedTask ? selectedTask.task_id : null;
     data.selected_task_label = selectedTask ? selectedTask.task_label : null;
+    data.essay_id = selectedTask ? selectedTask.essay_id : null;
+    data.task_order = selectedTask ? currentTaskOrder : null;
     data.condition = selectedTask ? selectedTask.condition : null;
     data.attempt_id = selectedTask ? currentAttemptId : null;
     data.attempt_uid = selectedTask ? currentAttemptUid : null;
@@ -388,6 +421,7 @@ const taskIntro = {
     data.participant_id = participantId;
     data.attempt_id = currentAttemptId;
     data.attempt_uid = currentAttemptUid;
+    data.task_order = currentTaskOrder;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
     data.condition = selectedTask.condition;
@@ -450,6 +484,7 @@ const generation = {
       participant_id: participantId,
       attempt_id: currentAttemptId,
       attempt_uid: currentAttemptUid,
+      task_order: currentTaskOrder,
       task_id: selectedTask.task_id,
       task_label: selectedTask.task_label,
       condition: selectedTask.condition,
@@ -640,6 +675,7 @@ const reviewAndRefine = {
 
     data.participant_id = participantId;
     data.attempt_id = currentAttemptId;
+    data.task_order = currentTaskOrder;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
     data.condition = selectedTask.condition;
@@ -654,6 +690,7 @@ const reviewAndRefine = {
 
     if (action === "finish") {
       completedTaskIds.add(selectedTask.task_id);
+      completedTaskOrders.set(selectedTask.task_id, currentTaskOrder);
 
       const allReviews = [...pastReviews, { action, followup_prompt: null, rt: data.rt }];
       const structuredHistory = generations.map((gen, idx) => {
@@ -761,6 +798,7 @@ const teacherOnlyFeedback = {
     data.participant_id = participantId;
     data.attempt_id = currentAttemptId;
     data.attempt_uid = currentAttemptUid;
+    data.task_order = currentTaskOrder;
     data.task_id = selectedTask.task_id;
     data.task_label = selectedTask.task_label;
     data.condition = selectedTask.condition;
@@ -777,6 +815,7 @@ const teacherOnlyFeedback = {
     data.task_completed_at = completedAt;
     data.task_duration_ms = taskStartedAt ? Date.parse(completedAt) - Date.parse(taskStartedAt) : null;
     completedTaskIds.add(selectedTask.task_id);
+    completedTaskOrders.set(selectedTask.task_id, currentTaskOrder);
     teacherFinalDraft = "";
     delete data.response;
   }
