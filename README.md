@@ -174,27 +174,42 @@ A・Bの合計得点は算出しません。Aは直接比較による主観評�
 | `d1_feedback_experience` / `d2_ai_experience` | 1=0回、2=1～2回、3=3～5回、4=6～10回、5=11回以上、unknown=不明・回答しない |
 | `qualification_types` / `qualification_answers` | 資格種別・回答原値 |
 | `cefr_level` / `cefr_sources` / `cefr_candidates` | CEFR相当ラベル、採用根拠、換算候補 |
-| `toeic_skill_cefr` | TOEIC技能別の換算結果（入力がある場合） |
+| `toeic_combined_score` | 文科省方式のTOEIC合算スコア（L&R + 2.5 × S&W、両方がある場合） |
 | `questionnaire_duration_ms` | 回答時間（Surveyのrt） |
 | `questionnaire_preview` | プレビューかどうか |
 | `response` | Surveyの元回答 |
 
 ### CEFRラベリング
 
-属性記述のみを目的とし、自己評価は求めません。回答された資格・スコアから決定論的に換算します。4技能の総合資格を優先し、複数ある場合は最高のCEFR相当レベルを採用します。TOEICは総合資格が換算できない場合に限り、4技能すべての技能別換算が可能なら最も低い技能のレベルを保守的な研究用ラベルとして使用します（公式の総合CEFRではありません）。L&Rのみ、その他資格、未回答、換算表外のスコアは原値を残し、他に換算可能な資格がなければUnknownとします。取得時期は限定しないため、現在の英語力の実測値ではありません。
+属性記述のみを目的とし、自己評価は求めません。文部科学省（2018）「各資格・検定試験とCEFRとの対照表」（平成30年3月）を原則に、資格・4技能総合スコアから決定論的に換算します。公表後に導入・変更された形式は実施団体の公式基準で補完します。複数の換算可能な資格がある場合は最高のCEFR相当レベルを採用し、採用根拠・候補・原回答・換算基準版を保存します。換算不能な回答や資格なしはUnknownとします。英検の合格級のみ、TOEIC L&Rのみでは4技能総合レベルを付与しません。取得時期は限定しないため、現在の英語力の実測値ではありません。
 
-換算表（2026-11-26時点の研究用設定）：
-- 英検合格級：3級 A1、準2級・準2級プラス A2、2級 B1、準1級 B2、1級 C1。級による代表ラベルであり、CSEスコアの個別算出ではありません。
-- TOEFL iBT 旧尺度：42 B1、72 B2、95 C1、114 C2（各下限）。
-- TOEFL iBT 新尺度：1 A1、2 A2、3 B1、4 B2、5 C1、6 C2（各下限）。
-- IELTS：4 B1、5.5 B2、7 C1、8.5 C2（各下限、概算対応）。
-- TEAP：135 A2、225 B1、309 B2、375 C1（各下限）。
-- TEAP CBT：235 A2、420 B1、600 B2、800 C1（各下限）。
-- TOEIC：技能別のETS公表下限を使用。4技能の最小レベルは本研究独自の保守的な規則。
+#### 換算下限（スコアがない区分は判定しない）
 
-出典：[英検協会の対照表](https://www.eiken.or.jp/ielts/merit/index.html)、[ETS旧TOEFL対照表](https://www.in.ets.org/toefl/score-users/ibt/compare-scores.html)、[ETS新TOEFL対照表](https://www.ets.org/toefl/institutions/ibt/score-scale-update.html)、[IELTS公式CEFR対応](https://ielts.org/organisations/ielts-for-organisations/compare-ielts/ielts-and-the-cefr)、[IIBC TOEIC対照表](https://www.iibc-global.org/toeic/official_data/toeic_cefr.html)、[ETS TOEIC技能別対照表](https://www.ets.org/pdfs/toeic/toeic-mapping-cefr-reference.pdf)。
+| 試験 | A1 | A2 | B1 | B2 | C1 | C2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 英検CSE | 1400 | 1700 | 1950 | 2300 | 2600 | — |
+| ケンブリッジ英語検定 | 100 | 120 | 140 | 160 | 180 | 200 |
+| GTEC（2018表） | 270 | 690 | 960 | 1190 | 1350 | — |
+| GTEC（2023年4月以降） | 260 | 680 | 930 | 1180 | 1350 | — |
+| IELTS | — | — | 4 | 5.5 | 7 | 8.5 |
+| TEAP | — | 135 | 225 | 309 | 375 | — |
+| TEAP CBT | — | 235 | 420 | 600 | 800 | — |
+| TOEFL iBT（旧） | — | — | 42 | 72 | 95 | — |
+| TOEFL iBT（新） | 1 | 2 | 3 | 4 | 5 | 6 |
+| TOEIC合算 | 320 | 625 | 1150 | 1560 | 1845 | — |
 
-質問内容や換算ルールを変更する場合は `questionnaire.js` の版も更新してください。アンケートの内容・収集項目を変更した場合は同意文の更新も検討してください。
+英検・ケンブリッジは試験ごとのCEFR算出範囲を適用し、範囲未満は判定なし、範囲超過は算出可能な最高レベルに制限します。英検（受験級と同じ試験回の4技能総合CSE）：3級1400–1699、準2級1400–1949、準2級プラス1550–1949、2級1728–2299、準1級1980–2599、1級2304–3299。準2級プラスは英検協会の新設級の基準を使用。ケンブリッジ：A2 Key 100–150、B1 Preliminary 120–170、B2 First 140–190、C1 Advanced 160–210、C2 Proficiency 180–230。
+
+GTECはCore（上限840）、Basic（1080）、Advanced（1280）、CBT（1400）の4技能試験に限定します。2023年4月の基準改定を区別し、時期不明の場合は旧・新基準のラベルが一致する場合のみ採用します。それ以前のスコア形式の異なる試験は換算対象外です。TOEFL iBT旧尺度の95～120は2018表に従いC1、新尺度はETS基準に従います。TOEICは両方の合計スコアから L&R + 2.5 × S&W を算出し、文科省の閾値を適用します（技能別最低値は使用しません）。
+
+出典：
+- [文部科学省（2018）各資格・検定試験とCEFRとの対照表](https://www.mext.go.jp/b_menu/shingi/chousa/koutou/091/gijiroku/__icsFiles/afieldfile/2018/07/27/1407616_003.pdf)
+- [日本英語検定協会：英検CSEとCEFR](https://www.eiken.or.jp/cse/)
+- [ETS：TOEFL iBT新尺度](https://www.ets.org/toefl/institutions/ibt/score-scale-update.html)
+- [ベネッセ：2023年4月以降のGTEC閾値改定](https://www.benesse.co.jp/gtec/fs/cuet/news/pdf/gtec20220823_01.pdf)
+- [ベネッセ：GTEC現行対照表](https://www.benesse.co.jp/gtec/fs/voice/question.html)
+
+質問内容や換算ルールを変更する場合は `questionnaire.js` の版も更新してください。アンケートの内容・収集項目を変更した場合は同意文の更新も検討してください。今回の変更は既存同意文の英語資格・検定試験の取得級・スコアという収集範囲内です。
 
 ## 動作確認チェックリスト
 
