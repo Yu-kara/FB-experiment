@@ -188,7 +188,7 @@ const consent = {
   stimulus: () => `
     <section class="research-consent">
       <h2>研究参加に関する説明と同意</h2>
-      ${PREVIEW_MODE ? '<p class="preview-banner">【プレビュー】同意画面の確認用です。研究データの収集・AI通信は行いません。</p>' : ''}
+      ${PREVIEW_MODE ? '<p class="preview-banner">【プレビュー】同意画面の確認用です。AI通信は行いません。プレビュー操作データは研究分析に使用しないでください。</p>' : ''}
       <p>以下の説明をお読みいただき、研究への参加について選択してください。</p>
 
       <h3>研究実施者・問い合わせ先</h3>
