@@ -43,6 +43,39 @@
     text-align: center;
   }
 
+  /* 研究参加説明・同意確認 */
+  .research-consent {
+    box-sizing: border-box;
+    max-width: 46rem;
+    margin: 0 auto 1rem;
+    padding: 1.25rem 1.5rem;
+    text-align: left;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    color: #1e293b;
+    line-height: 1.8;
+    font-size: 0.95rem;
+  }
+  .research-consent h2 {
+    margin: 0 0 1rem;
+    text-align: center;
+    color: #0f172a;
+    font-size: 1.4rem;
+  }
+  .research-consent h3 {
+    margin: 1.25rem 0 0.45rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid #e2e8f0;
+    color: #23395d;
+    font-size: 1.02rem;
+  }
+  .research-consent p { margin: 0.35rem 0 0.8rem; }
+  .research-consent-links a { color: #1d4ed8; text-decoration: underline; overflow-wrap: anywhere; }
+  @media (max-width: 600px) {
+    .research-consent { padding: 1rem; }
+  }
+
   /* トップ画面（識別NO入力 ＆ 課題選択メニュー） */
   .menu-container {
     max-width: 44rem;
