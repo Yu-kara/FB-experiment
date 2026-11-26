@@ -10,7 +10,7 @@ const PREVIEW_MODE = true; // 画面確認後、本番運用前に必ず false �
 // External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
 // ESSAYS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
-// RESEARCH_INFO: 本番前に研究実施者の所属・氏名・指導教員・連絡先を設定してください。
+// consent.html: 本番前に研究実施者の所属・氏名・指導教員・連絡先を入力してください。
 
 // ① 初期FBは表層的な誤りを優先し、後続対話は教師の指示に柔軟に対応
 const SYSTEM_PROMPT = `あなたは教員の文章指導を支援するAIです。
@@ -54,13 +54,45 @@ function isTaskSelectable(task) {
   return !completed.some(t => t.condition === task.condition || t.essay_id === task.essay_id);
 }
 
-// 研究参加説明と問い合わせ先（研究者情報は実験公開前に必ず設定する）
-const RESEARCH_INFO = {
-  institution: "【所属大学・研究科を入力】",
-  researcher: "【研究実施者の氏名を入力】",
-  supervisor: "【指導教員の氏名を入力】",
-  email: "【連絡先メールアドレスを入力】"
-};
+// 研究説明は consent.html に分離。起動前にHTMLを読み込み、取得失敗時は実験を停止する。
+const CONSENT_HTML_SOURCES = [
+  "https://raw.githubusercontent.com/Yu-kara/FB-experiment/main/consent.html",
+  "https://cdn.jsdelivr.net/gh/Yu-kara/FB-experiment@main/consent.html"
+];
+let consentHtml = "";
+let consentVersion = null;
+
+async function loadConsentHtml() {
+  let lastError = null;
+  for (const sourceUrl of CONSENT_HTML_SOURCES) {
+    try {
+      const response = await fetch(sourceUrl + "?t=" + Date.now(), { cache: "no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const parsed = new DOMParser().parseFromString(await response.text(), "text/html");
+      const main = parsed.querySelector("#research-consent-content");
+      if (!main || !main.textContent.trim()) throw new Error("説明文が見つかりません");
+      if (!PREVIEW_MODE && main.textContent.includes("【")) {
+        throw new Error("研究者情報が未入力です。consent.html の【...】を編集してください。");
+      }
+      const version = main.getAttribute("data-consent-version");
+      if (!version) throw new Error("同意文書の版が未設定です");
+      // GitHubのHTMLを挿入する際、スクリプトやイベント属性を除外
+      main.querySelectorAll("script,iframe,object,embed,form,input,button,style,link,base").forEach(el => el.remove());
+      main.querySelectorAll("*").forEach(el => {
+        Array.from(el.attributes).forEach(attr => {
+          if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+          if ((attr.name === "href" || attr.name === "src") && !/^(https:\/\/|#)/i.test(attr.value)) el.removeAttribute(attr.name);
+        });
+      });
+      consentHtml = main.outerHTML;
+      consentVersion = version;
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error("consent.htmlを読み込めませんでした: " + (lastError?.message || "原因不明"));
+}
 
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
 
@@ -181,63 +213,15 @@ function scrollToLatestMessage() {
   }, 60);
 }
 
-// 1. 研究参加の説明と同意確認（プレビューにも表示し内容確認を可能にする）
+// 1. 研究参加の説明と同意確認（本文は別ファイル consent.html から取得）
 const consent = {
   type: jsPsychHtmlButtonResponse,
   data: { feedback_phase: "consent" },
-  stimulus: () => `
-    <section class="research-consent">
-      <h2>研究参加に関する説明と同意</h2>
-      ${PREVIEW_MODE ? '<p class="preview-banner">【プレビュー】同意画面の確認用です。AI通信は行いません。プレビュー操作データは研究分析に使用しないでください。</p>' : ''}
-      <p>以下の説明をお読みいただき、研究への参加について選択してください。</p>
-
-      <h3>研究実施者・問い合わせ先</h3>
-      <p>所属：${escapeHtml(RESEARCH_INFO.institution)}<br>
-      研究実施者：${escapeHtml(RESEARCH_INFO.researcher)}<br>
-      指導教員：${escapeHtml(RESEARCH_INFO.supervisor)}<br>
-      連絡先：${escapeHtml(RESEARCH_INFO.email)}</p>
-      <p>本研究は指導教員による研究計画の確認のもとで実施します。</p>
-
-      <h3>研究目的と実験内容</h3>
-      <p>生成AIによる支援が、教師による英語ライティング・フィードバックの質や作成時間に与える影響を検討します。
-      教師単独FB条件とAI・教師協働FB条件で各1課題、計2課題に取り組みます。
-      いずれの条件でも、最終フィードバックは参加者自身が作成します。</p>
-
-      <h3>参加の自由と中止</h3>
-      <p>研究への参加は任意です。同意しない場合や参加途中で中止した場合も、不利益はありません。
-      本研究の結果を参加者個人の勤務評価や能力判定に使用することはありません。</p>
-
-      <h3>収集するデータと利用目的</h3>
-      <p>研究用参加者ID、対象作文・実施条件・実施順序、最終フィードバック、作業時間、およびAI・教師協働条件におけるAIの応答と対話履歴を記録します。
-      研究目的に限って分析し、論文等では個人が特定されない形で成果を公表します。</p>
-
-      <h3>データの保管・廃棄</h3>
-      <p>研究者が管理する研究データはアクセス権限を制限して保管し、原則として研究実施者と指導教員のみが閲覧します。
-      <strong>論文公表後5年間</strong>保存し、期間終了後に研究者が管理するデータを削除します。
-      Cognition.runおよび外部AIサービスに保存される情報には、各サービス固有の保存・削除ルールが適用されます。</p>
-
-      <h3>同意撤回・データ削除の申し出</h3>
-      <p><strong>同意はいつでも撤回できます。</strong>撤回の申し出に期限は設けません。
-      撤回や研究データの削除を希望する場合は、上記連絡先へ参加者IDを添えてご連絡ください。
-      研究者が保管しており個別に識別できるデータについては、申し出を受けて研究利用を中止し、削除します。
-      ただし、すでに公表した集計結果、個人と対応付けられなくなったデータ、すでに削除済みのデータは個別の取り消し・削除ができない場合があります。
-      外部サービス上の記録・バックアップは、サービスの規定に従って処理されるため、即時の消去を保証できません。</p>
-
-      <h3>外部サービスへの情報送信</h3>
-      <p>実験データの収集にはCognition.runを利用します。
-      AI・教師協働FB条件では、研究者が用意した架空の作文と参加者がAIに入力した指示・対話内容がOpenAI APIに送信されます。
-      個人情報や機密情報を入力しないでください。OpenAI APIは通常、サービスの安全性を維持する目的で、入力内容等を含み得るログを原則30日以内保存します（例外がある場合があります）。</p>
-      <p class="research-consent-links">
-        <a href="https://www.cognition.run/privacy" target="_blank" rel="noopener noreferrer">Cognition.runのプライバシーポリシー</a> ／
-        <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">OpenAI APIのデータ取扱い</a>
-      </p>
-
-      <p><strong>以上の内容を確認し、以下から意思を選択してください。</strong></p>
-    </section>`,
+  stimulus: () => `${PREVIEW_MODE ? '<p class="preview-banner">【プレビュー】AI通信は行いません。プレビューデータは研究分析に使用しないでください。</p>' : ""}${consentHtml}`,
   choices: ["説明を理解し、研究参加に同意する", "同意しない"],
   on_finish: data => {
     data.consent_given = data.response === 0;
-    data.consent_version = "2026-11-26";
+    data.consent_version = consentVersion;
   }
 };
 
@@ -979,8 +963,14 @@ surveyStylesheet.rel = "stylesheet";
 surveyStylesheet.href = "https://unpkg.com/@jspsych/plugin-survey@4.0.0/css/survey.min.css";
 const feedbackUtilsScript = document.createElement("script");
 feedbackUtilsScript.src = "https://cdn.jsdelivr.net/gh/kishiyamat/jspsych-openai-utils@1eb526cda0aad424f3efb4ddb1da926d099f5df1/dist/feedback-utils.js";
-// プレビューではOpenAI共通ライブラリが不要。外部JS読込失敗の影響を受けないようにする。
-function startExperiment() {
+// 研究説明を必ず先に読み込む。失敗した場合、同意画面なしで実験を開始しない。
+async function startExperiment() {
+  try {
+    await loadConsentHtml();
+  } catch (error) {
+    document.body.textContent = "研究参加説明を読み込めませんでした。実験担当者に連絡してください。詳細: " + error.message;
+    return;
+  }
   if (PREVIEW_MODE) {
     jsPsych.run(timeline);
     return;
