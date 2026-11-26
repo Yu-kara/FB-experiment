@@ -70,6 +70,19 @@
     color: #23395d;
     font-size: 1.02rem;
   }
+  /* jsPsychの中央寄せスタイルが説明文に継承されないようにする */
+  #jspsych-html-button-response-stimulus .research-consent,
+  #jspsych-html-button-response-stimulus .research-consent h3,
+  #jspsych-html-button-response-stimulus .research-consent p,
+  #jspsych-html-button-response-stimulus .research-consent ul,
+  #jspsych-html-button-response-stimulus .research-consent li,
+  .research-consent h3,
+  .research-consent p,
+  .research-consent ul,
+  .research-consent li {
+    text-align: left !important;
+  }
+  .research-consent ul { padding-left: 1.5rem; list-style-position: outside; }
   .research-consent p { margin: 0.35rem 0 0.8rem; }
   .research-consent-links a { color: #1d4ed8; text-decoration: underline; overflow-wrap: anywhere; }
   @media (max-width: 600px) {
