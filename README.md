@@ -4,7 +4,7 @@ Cognition.run 上で実施する、**教師単独FBとAI・教師協働FB**を�
 
 両条件で最終FBを作成するのは**教師**です。教師単独条件ではAIを使用せず、協働条件ではAIの初期FBと追質問への応答を参考にします。協働時の対話ログも保存します。
 
-> **現状：実験準備中。** 4種類の課題作文は未登録（`essay_text: null`）です。Cognition.run での実通信・画面表示・データ保存の本番検証は未実施です。
+> **現状：実験準備中。** 2種類の課題作文は未登録（`essay_text: null`）です。Cognition.run での実通信・画面表示・データ保存の本番検証は未実施です。
 
 ## 実験フロー
 
@@ -28,7 +28,7 @@ flowchart TD
 
 同じ課題を再実施すると前回の対話履歴と教師の最終FB草稿は引き継がれず、新しい試行として記録されます。
 
-初期設定では **教師単独2課題（task_1・task_3）、AI・教師協働2課題（task_2・task_4）**です。条件は `TASKS` の `condition` で設定します。課題をどの順序で実施するかは現在のメニューから参加者が選ぶ方式です。
+初期設定では **教師単独1課題（task_1）、AI・教師協働1課題（task_2）**です。条件は `TASKS` の `condition` で設定します。課題をどの順序で実施するかは現在のメニューから参加者が選ぶ方式です。
 
 **研究設計上の注意：** 作文を条件ごとに固定すると、条件差と作文固有の難易度差が交絡する可能性があります。同じ作文群を参加者間で条件を入れ替えて割り当てる、順序をカウンターバランスする等の方法は本実験前に検討してください。現在のコードに自動カウンターバランスは実装されていません。
 
@@ -58,9 +58,7 @@ JavaScriptはSurveyプラグインのCSSと `jspsych-openai-utils` を外部か�
 ```javascript
 const TASKS = [
   { task_id: "task_1", task_label: "課題 1", essay_id: "essay_1", condition: "teacher_only", essay_text: null },
-  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", condition: "collaborative", essay_text: null },
-  { task_id: "task_3", task_label: "課題 3", essay_id: "essay_3", condition: "teacher_only", essay_text: null },
-  { task_id: "task_4", task_label: "課題 4", essay_id: "essay_4", condition: "collaborative", essay_text: null }
+  { task_id: "task_2", task_label: "課題 2", essay_id: "essay_2", condition: "collaborative", essay_text: null }
 ];
 ```
 
@@ -129,8 +127,8 @@ jsPsychの各試行は `feedback_phase` で識別できます（例：`task_menu
 
 ## 動作確認チェックリスト
 
-- [ ] 作文4本と、統制したエラーの正解データを準備した
-- [ ] 教師単独2課題・協働2課題の割り当て、実施順序、作文の条件間カウンターバランスを研究計画に合わせて決めた
+- [ ] 作文2本と、統制したエラーの正解データを準備した
+- [ ] 教師単独1課題・協働1課題の割り当て、実施順序、作文の条件間カウンターバランスを研究計画に合わせて決めた
 - [ ] 教師単独条件ではAI通信が行われないことを確認した
 - [ ] External CSS・External JS・jsPsychプラグインを設定した
 - [ ] 教師に表示された作文とAIに送信された作文が一致した
