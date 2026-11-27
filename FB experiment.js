@@ -1,20 +1,35 @@
 // =========================================================================
 // ★ プレビュー切り替えスイッチ ★
 // true  : APIキーなしで「トップ画面〜AIとの会話画面」の流れを即座に確認できます
-// false : 本番モード（同意確認 → アクセスコード認証 → トップ画面 → AI対話）で動作します
+// false : 本番モード（同意確認 → パスワード認証 → トップ画面 → AI対話）で動作します
 // =========================================================================
 const PREVIEW_MODE = true; // 画面確認後、本番運用前に必ず false に戻す
 
 // Cognition の Source code に貼り付ける jsPsych 8 / Survey 4 のコード（OpenAI API版・課題選択トップ画面付き）
-// External JS: consent.js と questionnaire.js を登録してください。APIキーはサーバー側の秘密情報として管理します。
+// External JS: consent.js、questionnaire.js（同意・アンケート用、プレビューでも必須）、encrypted-api-key.js（本番用）を登録してください。
 // External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
 // ESSAYS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
 // consent.js: 本番前に研究実施者の所属・氏名・指導教員・連絡先を入力してください。
 
-// AIのシステムプロンプトと生成モデルは Cloudflare Worker (proxy/worker.js) で管理する。
-// Workerの公開URLを設定する。秘密のAPIキーはここに書かないこと。
-const API_PROXY_URL = ""; // 例: https://fb-study-ai.example.workers.dev
+// ① 初期FBは表層的な誤りを優先し、後続対話は教師の指示に柔軟に対応
+const SYSTEM_PROMPT = `あなたは教員の文章指導を支援するAIです。
+【1回目の応答】
+提示された学習者の文章を原文とし、日本語で【フィードバック案】の見出しを使って回答してください。
+初期フィードバックでは文法・語彙・スペリングなど表層的な誤りを優先し、改善点と具体的な改善案（書き換え例を含む）を簡潔に提示してください。
+内容・構成についても必要に応じて指摘して構いません。学習者の意図を根拠なく断定しないでください。
+
+【2回目以降の応答】
+最初に提示された学習者の文章を原文として参照し、これまでのやり取りと教員からの最新の追質問・修正指示を踏まえて、日本語で簡潔に応答してください。教員の指示に応じて内容・構成・文脈に関する改善にも対応してください。`;
+
+// OpenAI の生成設定（必要に応じて model を "gpt-4o" や "gpt-4o-mini" 等に変更してください）
+const SETTINGS = {
+  model: "gpt-6-luna",
+  reasoningEffort: "none",
+  temperature: 0.3,
+  maxOutputTokens: 8000
+};
+
 // 作文は2本のみ。条件×作文の4通りから参加者に指示された組み合わせを選択する。
 // 本番前に各essay_textを登録する。プレビューでは共通のダミー英文を表示する。
 const ESSAYS = [
@@ -75,7 +90,7 @@ function loadConsentFromExternalJS() {
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
 
 // セッション状態管理変数
-let accessCode = null;
+let password = null;
 let participantId = "";
 let selectedTask = null;
 let currentAttemptId = 0;
@@ -107,8 +122,10 @@ function clearLoadingTimer() {
 const jsPsych = initJsPsych({
   on_finish: () => {
     clearLoadingTimer();
-    accessCode = null;
-
+    password = null;
+    if (window.FeedbackUtils && typeof FeedbackUtils.clearKey === "function") {
+      FeedbackUtils.clearKey();
+    }
     jsPsych.getDisplayElement().textContent = "お疲れさまでした。実験担当者に連絡してください。";
   }
 });
@@ -201,7 +218,7 @@ const consent = {
   }
 };
 
-// 2. 参加者ごとに配布したアクセスコードを入力する（本番モードのみ）。
+// 2. パスワード入力（本番モードのみ）
 const passwordEntry = {
   type: jsPsychSurvey,
   min_width: "0px",
@@ -209,43 +226,37 @@ const passwordEntry = {
   survey_json: {
     showQuestionNumbers: "off", showCompletedPage: false, completeText: "開始",
     elements: [{
-      type: "text", name: "password", title: "研究用アクセスコード",
+      type: "text", name: "password", title: "実験用パスワード",
       inputType: "password", autocomplete: "off", isRequired: true,
-      requiredErrorText: "研究者から配布されたアクセスコードを入力してください。"
+      requiredErrorText: "パスワードを入力してください。"
     }]
   },
   on_finish: data => {
-    accessCode = String(data.response.password || "").trim();
+    password = data.response.password;
     delete data.response;
   }
 };
 
-// 3. Workerでアクセスコードを認証し、OpenAI APIキーは参加者に渡さない。
+// 3. OpenAI APIキー復号（本番モードのみ）
 const authentication = {
   type: jsPsychCallFunction,
   async: true,
   data: { feedback_phase: "authentication" },
   func: done => {
-    if (!API_PROXY_URL.startsWith("https://") || !accessCode) {
-      done({ authentication_succeeded: false, authentication_error: "中継サーバーURLまたはアクセスコードが未設定です。" });
+    const suppliedPassword = password;
+    password = null;
+    if (!window.ENCRYPTED_API_KEY) {
+      done({
+        authentication_succeeded: false,
+        authentication_error: "External JS に encrypted-api-key.js が設定されていません。"
+      });
       return;
     }
-    fetch(API_PROXY_URL.replace(/\/$/, "") + "/auth", {
-      method: "POST",
-      headers: { authorization: "Bearer " + accessCode }
-    }).then(async response => {
-      const body = await response.json().catch(() => ({}));
-      done({
-        authentication_succeeded: response.ok && body.authenticated === true,
-        authentication_error: response.ok ? null : (body.error || "アクセスコードが無効です。")
-      });
-    }).catch(() => done({
-      authentication_succeeded: false,
-      authentication_error: "中継サーバーに接続できません。URL・Origin設定・通信状態を確認してください。"
-    }));
+    FeedbackUtils.decryptApiKey(window.ENCRYPTED_API_KEY, suppliedPassword, done);
   },
   on_finish: data => { Object.assign(data, data.value); delete data.value; }
 };
+
 const authenticationTimeline = {
   timeline: [passwordEntry, authentication],
   conditional_function: () => {
@@ -516,12 +527,12 @@ const generation = {
       essay_text: essayText,
       turn_index: turnIndex,
       user_prompt: userPromptInTurn,
-      system_prompt: null, // actual prompt is returned by Worker
+      system_prompt: SYSTEM_PROMPT,
       api_input: apiInputText,
-      model: null,
-      reasoning_effort: null,
-      temperature: null,
-      max_output_tokens: null,
+      model: SETTINGS.model,
+      reasoning_effort: SETTINGS.reasoningEffort,
+      temperature: SETTINGS.temperature,
+      max_output_tokens: SETTINGS.maxOutputTokens,
       generated_at: new Date().toISOString()
     };
 
@@ -540,31 +551,10 @@ const generation = {
       done({ ...record, api_error: "作文が未設定です。", ai_feedback: null, generation_attempt: 0 });
       return;
     }
-    if (!API_PROXY_URL || !accessCode) {
-      done({ ...record, api_error: "中継サーバーURLまたはアクセスコードが未設定です。", ai_feedback: null, generation_attempt: 0 });
-      return;
-    }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 85000);
-    fetch(API_PROXY_URL.replace(/\/$/, "") + "/generate", {
-      method: "POST",
-      headers: { authorization: "Bearer " + accessCode, "content-type": "application/json" },
-      body: JSON.stringify({ text: apiInputText }),
-      signal: controller.signal
-    }).then(async response => {
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || typeof result.ai_feedback !== "string") throw new Error(result.error || "AIから有効な応答が返りませんでした。");
-      done({ ...record, ...result, api_error: null });
-    }).catch(error => {
-      done({
-        ...record,
-        api_error: error.name === "AbortError"
-          ? "AI通信が時間切れになりました。実験担当者に連絡してください。"
-          : String(error.message || "中継サーバーとの通信に失敗しました。"),
-        ai_feedback: null,
-        generation_attempt: 1
-      });
-    }).finally(() => clearTimeout(timeoutId));
+    FeedbackUtils.generate(
+      { ...SETTINGS, systemPrompt: SYSTEM_PROMPT, text: apiInputText },
+      result => done({ ...record, ...result })
+    );
   },
   on_finish: data => {
     clearLoadingTimer();
@@ -990,7 +980,9 @@ const timeline = PREVIEW_MODE
 const surveyStylesheet = document.createElement("link");
 surveyStylesheet.rel = "stylesheet";
 surveyStylesheet.href = "https://unpkg.com/@jspsych/plugin-survey@4.0.0/css/survey.min.css";
-// HTMLを読み込んでから実験を開始。APIキーはCloudflare Worker側のみで使用する。
+const feedbackUtilsScript = document.createElement("script");
+feedbackUtilsScript.src = "https://cdn.jsdelivr.net/gh/kishiyamat/jspsych-openai-utils@1eb526cda0aad424f3efb4ddb1da926d099f5df1/dist/feedback-utils.js";
+// External JSの同意文を読み込めない場合、同意画面なしで実験を開始しない。
 function startExperiment() {
   try {
     loadConsentFromExternalJS();
@@ -1002,17 +994,25 @@ function startExperiment() {
     if (typeof window.FB_QUESTIONNAIRE?.buildTrial !== "function") {
       throw new Error("questionnaire.js を External JS に登録してください。");
     }
-    postTaskQuestionnaire.timeline = [window.FB_QUESTIONNAIRE.buildTrial({ surveyPlugin: jsPsychSurvey, getContext: questionnaireContext })];
+    postTaskQuestionnaire.timeline = [window.FB_QUESTIONNAIRE.buildTrial({
+      surveyPlugin: jsPsychSurvey,
+      getContext: questionnaireContext
+    })];
   } catch (error) {
     document.body.textContent = "アンケートを読み込めませんでした。実験担当者に連絡してください。詳細: " + error.message;
     return;
   }
-  if (!PREVIEW_MODE && !API_PROXY_URL.startsWith("https://")) {
-    document.body.textContent = "AI中継サーバーのURLが未設定です。実験担当者に連絡してください。";
+  if (PREVIEW_MODE) {
+    jsPsych.run(timeline);
     return;
   }
-  jsPsych.run(timeline);
+  feedbackUtilsScript.onload = () => jsPsych.run(timeline);
+  feedbackUtilsScript.onerror = () => {
+    document.body.textContent = "共通ライブラリを読み込めませんでした。ページを再読み込みしてください。";
+  };
+  document.head.append(feedbackUtilsScript);
 }
+
 surveyStylesheet.onload = startExperiment;
 surveyStylesheet.onerror = () => {
   if (PREVIEW_MODE) {
