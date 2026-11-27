@@ -108,9 +108,7 @@ const jsPsych = initJsPsych({
   on_finish: () => {
     clearLoadingTimer();
     accessCode = null;
-    if (window.FeedbackUtils && typeof FeedbackUtils.clearKey === "function") {
-      FeedbackUtils.clearKey();
-    }
+
     jsPsych.getDisplayElement().textContent = "お疲れさまでした。実験担当者に連絡してください。";
   }
 });
@@ -518,12 +516,12 @@ const generation = {
       essay_text: essayText,
       turn_index: turnIndex,
       user_prompt: userPromptInTurn,
-      system_prompt: SYSTEM_PROMPT,
+      system_prompt: null, // actual prompt is returned by Worker
       api_input: apiInputText,
-      model: SETTINGS.model,
-      reasoning_effort: SETTINGS.reasoningEffort,
-      temperature: SETTINGS.temperature,
-      max_output_tokens: SETTINGS.maxOutputTokens,
+      model: null,
+      reasoning_effort: null,
+      temperature: null,
+      max_output_tokens: null,
       generated_at: new Date().toISOString()
     };
 
@@ -542,10 +540,31 @@ const generation = {
       done({ ...record, api_error: "作文が未設定です。", ai_feedback: null, generation_attempt: 0 });
       return;
     }
-    FeedbackUtils.generate(
-      { ...SETTINGS, systemPrompt: SYSTEM_PROMPT, text: apiInputText },
-      result => done({ ...record, ...result })
-    );
+    if (!API_PROXY_URL || !accessCode) {
+      done({ ...record, api_error: "中継サーバーURLまたはアクセスコードが未設定です。", ai_feedback: null, generation_attempt: 0 });
+      return;
+    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 85000);
+    fetch(API_PROXY_URL.replace(/\/$/, "") + "/generate", {
+      method: "POST",
+      headers: { authorization: "Bearer " + accessCode, "content-type": "application/json" },
+      body: JSON.stringify({ text: apiInputText }),
+      signal: controller.signal
+    }).then(async response => {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || typeof result.ai_feedback !== "string") throw new Error(result.error || "AIから有効な応答が返りませんでした。");
+      done({ ...record, ...result, api_error: null });
+    }).catch(error => {
+      done({
+        ...record,
+        api_error: error.name === "AbortError"
+          ? "AI通信が時間切れになりました。実験担当者に連絡してください。"
+          : String(error.message || "中継サーバーとの通信に失敗しました。"),
+        ai_feedback: null,
+        generation_attempt: 1
+      });
+    }).finally(() => clearTimeout(timeoutId));
   },
   on_finish: data => {
     clearLoadingTimer();
@@ -971,9 +990,7 @@ const timeline = PREVIEW_MODE
 const surveyStylesheet = document.createElement("link");
 surveyStylesheet.rel = "stylesheet";
 surveyStylesheet.href = "https://unpkg.com/@jspsych/plugin-survey@4.0.0/css/survey.min.css";
-const feedbackUtilsScript = document.createElement("script");
-feedbackUtilsScript.src = "https://cdn.jsdelivr.net/gh/kishiyamat/jspsych-openai-utils@1eb526cda0aad424f3efb4ddb1da926d099f5df1/dist/feedback-utils.js";
-// External JSの同意文を読み込めない場合、同意画面なしで実験を開始しない。
+// HTMLを読み込んでから実験を開始。APIキーはCloudflare Worker側のみで使用する。
 function startExperiment() {
   try {
     loadConsentFromExternalJS();
@@ -985,25 +1002,17 @@ function startExperiment() {
     if (typeof window.FB_QUESTIONNAIRE?.buildTrial !== "function") {
       throw new Error("questionnaire.js を External JS に登録してください。");
     }
-    postTaskQuestionnaire.timeline = [window.FB_QUESTIONNAIRE.buildTrial({
-      surveyPlugin: jsPsychSurvey,
-      getContext: questionnaireContext
-    })];
+    postTaskQuestionnaire.timeline = [window.FB_QUESTIONNAIRE.buildTrial({ surveyPlugin: jsPsychSurvey, getContext: questionnaireContext })];
   } catch (error) {
     document.body.textContent = "アンケートを読み込めませんでした。実験担当者に連絡してください。詳細: " + error.message;
     return;
   }
-  if (PREVIEW_MODE) {
-    jsPsych.run(timeline);
+  if (!PREVIEW_MODE && !API_PROXY_URL.startsWith("https://")) {
+    document.body.textContent = "AI中継サーバーのURLが未設定です。実験担当者に連絡してください。";
     return;
   }
-  feedbackUtilsScript.onload = () => jsPsych.run(timeline);
-  feedbackUtilsScript.onerror = () => {
-    document.body.textContent = "共通ライブラリを読み込めませんでした。ページを再読み込みしてください。";
-  };
-  document.head.append(feedbackUtilsScript);
+  jsPsych.run(timeline);
 }
-
 surveyStylesheet.onload = startExperiment;
 surveyStylesheet.onerror = () => {
   if (PREVIEW_MODE) {
