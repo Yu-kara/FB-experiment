@@ -2,11 +2,11 @@
 // 換算は研究上の属性ラベルであり、現在の能力の実測ではありません。詳細・出典は README.md。
 (function install(root) {
   "use strict";
-  const VERSION="2026-11-27-v2", MAPPING_VERSION="mext-2018-2026-v2";
+  const VERSION="2026-11-27-v3", MAPPING_VERSION="mext-2018-2026-v2";
   const levels=["A1","A2","B1","B2","C1","C2"];
   const choices=(labels)=>labels.map((text,i)=>({value:i+1,text}));
-  const change=choices(["大幅に減少した","減少した","やや減少した","変化しなかった","やや増加した","増加した","大幅に増加した"]).concat({value:"na",text:"該当しない・判断できない"});
-  const burden=choices(["全く負担を感じなかった","ほとんど負担を感じなかった","あまり負担を感じなかった","ある程度負担を感じた","やや大きな負担を感じた","大きな負担を感じた","非常に大きな負担を感じた"]).concat({value:"na",text:"該当しない・判断できない"});
+  const change=choices(["1（大幅に減少した）","2","3","4","5","6","7","8（大幅に増加した）"]);
+  const burden=choices(["1（全く負担を感じなかった）","2","3","4","5","6","7","8（非常に大きな負担を感じた）"]).concat({value:"na",text:"該当しない・判断できない"});
   const experience=choices(["全くない","1～2回","3～5回","6～10回","11回以上"]).concat({value:"unknown",text:"覚えていない・回答しない"});
   const aItems=[
     ["a1_error_detection","文法・語彙・スペリング等の表層的な誤りを発見すること"],
@@ -120,9 +120,9 @@
         const raw=data.response&&typeof data.response==="object"?data.response:{};
         Object.assign(data,getContext(),mapQualifications(raw));
         for(const [name] of [...aItems,...bItems]){
-          const n=numeric(raw[name],1,7,1);
-          data[name]=n;data[name+"_status"]=n!==null?"answered":raw[name]==="na"?"not_applicable":"unanswered";
-          if(name.startsWith("a"))data[name+"_change"]=n===null?null:n-4;
+          const n=numeric(raw[name],1,8,1);
+          data[name]=n;data[name+"_status"]=n!==null?"answered":name.startsWith("b")&&raw[name]==="na"?"not_applicable":"unanswered";
+          if(name.startsWith("a"))data[name+"_change"]=n===null?null:n-4.5;
         }
         for(const name of ["c1_reduced","c2_increased","d1_feedback_experience","d2_ai_experience"])data[name]=raw[name]??null;
         data.qualification_types=Array.isArray(raw.qualification_types)?raw.qualification_types:[];
