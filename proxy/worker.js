@@ -136,7 +136,9 @@ export default {
           model: env.OPENAI_MODEL,
           instructions: STUDY_INSTRUCTIONS,
           input: input,
-          max_output_tokens: 3000,
+          reasoning: { effort: "none" },
+          temperature: 0.3,
+          max_output_tokens: 8000,
           store: false
         }),
         signal: AbortSignal.timeout(80000)
@@ -158,9 +160,10 @@ export default {
       ai_feedback: output,
       generation_attempt: 1,
       model: result.model || env.OPENAI_MODEL,
-      max_output_tokens: 3000,
-      reasoning_effort: null,
-      temperature: null
+      system_prompt: STUDY_INSTRUCTIONS,
+      max_output_tokens: 8000,
+      reasoning_effort: "none",
+      temperature: 0.3
     }, 200, headers);
   }
 };
