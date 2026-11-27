@@ -1,35 +1,20 @@
 // =========================================================================
 // ★ プレビュー切り替えスイッチ ★
 // true  : APIキーなしで「トップ画面〜AIとの会話画面」の流れを即座に確認できます
-// false : 本番モード（同意確認 → パスワード認証 → トップ画面 → AI対話）で動作します
+// false : 本番モード（同意確認 → アクセスコード認証 → トップ画面 → AI対話）で動作します
 // =========================================================================
 const PREVIEW_MODE = true; // 画面確認後、本番運用前に必ず false に戻す
 
 // Cognition の Source code に貼り付ける jsPsych 8 / Survey 4 のコード（OpenAI API版・課題選択トップ画面付き）
-// External JS: consent.js、questionnaire.js（同意・アンケート用、プレビューでも必須）、encrypted-api-key.js（本番用）を登録してください。
+// External JS: consent.js と questionnaire.js を登録してください。APIキーはサーバー側の秘密情報として管理します。
 // External CSS: FB experiment.css の内容を Cognition.run に登録してください。
 // Plugins: survey / html-button-response / call-function を有効にしてください。
 // ESSAYS: 研究者が作成した作文を essay_text に登録してください（画像・OCRは使用しません）。
 // consent.js: 本番前に研究実施者の所属・氏名・指導教員・連絡先を入力してください。
 
-// ① 初期FBは表層的な誤りを優先し、後続対話は教師の指示に柔軟に対応
-const SYSTEM_PROMPT = `あなたは教員の文章指導を支援するAIです。
-【1回目の応答】
-提示された学習者の文章を原文とし、日本語で【フィードバック案】の見出しを使って回答してください。
-初期フィードバックでは文法・語彙・スペリングなど表層的な誤りを優先し、改善点と具体的な改善案（書き換え例を含む）を簡潔に提示してください。
-内容・構成についても必要に応じて指摘して構いません。学習者の意図を根拠なく断定しないでください。
-
-【2回目以降の応答】
-最初に提示された学習者の文章を原文として参照し、これまでのやり取りと教員からの最新の追質問・修正指示を踏まえて、日本語で簡潔に応答してください。教員の指示に応じて内容・構成・文脈に関する改善にも対応してください。`;
-
-// OpenAI の生成設定（必要に応じて model を "gpt-4o" や "gpt-4o-mini" 等に変更してください）
-const SETTINGS = {
-  model: "gpt-6-luna",
-  reasoningEffort: "none",
-  temperature: 0.3,
-  maxOutputTokens: 8000
-};
-
+// AIのシステムプロンプトと生成モデルは Cloudflare Worker (proxy/worker.js) で管理する。
+// Workerの公開URLを設定する。秘密のAPIキーはここに書かないこと。
+const API_PROXY_URL = ""; // 例: https://fb-study-ai.example.workers.dev
 // 作文は2本のみ。条件×作文の4通りから参加者に指示された組み合わせを選択する。
 // 本番前に各essay_textを登録する。プレビューでは共通のダミー英文を表示する。
 const ESSAYS = [
@@ -90,7 +75,7 @@ function loadConsentFromExternalJS() {
 // スタイルは Cognition.run の External CSS（FB experiment.css）に登録してください。
 
 // セッション状態管理変数
-let password = null;
+let accessCode = null;
 let participantId = "";
 let selectedTask = null;
 let currentAttemptId = 0;
@@ -122,7 +107,7 @@ function clearLoadingTimer() {
 const jsPsych = initJsPsych({
   on_finish: () => {
     clearLoadingTimer();
-    password = null;
+    accessCode = null;
     if (window.FeedbackUtils && typeof FeedbackUtils.clearKey === "function") {
       FeedbackUtils.clearKey();
     }
@@ -218,7 +203,7 @@ const consent = {
   }
 };
 
-// 2. パスワード入力（本番モードのみ）
+// 2. 参加者ごとに配布したアクセスコードを入力する（本番モードのみ）。
 const passwordEntry = {
   type: jsPsychSurvey,
   min_width: "0px",
@@ -226,37 +211,43 @@ const passwordEntry = {
   survey_json: {
     showQuestionNumbers: "off", showCompletedPage: false, completeText: "開始",
     elements: [{
-      type: "text", name: "password", title: "実験用パスワード",
+      type: "text", name: "password", title: "研究用アクセスコード",
       inputType: "password", autocomplete: "off", isRequired: true,
-      requiredErrorText: "パスワードを入力してください。"
+      requiredErrorText: "研究者から配布されたアクセスコードを入力してください。"
     }]
   },
   on_finish: data => {
-    password = data.response.password;
+    accessCode = String(data.response.password || "").trim();
     delete data.response;
   }
 };
 
-// 3. OpenAI APIキー復号（本番モードのみ）
+// 3. Workerでアクセスコードを認証し、OpenAI APIキーは参加者に渡さない。
 const authentication = {
   type: jsPsychCallFunction,
   async: true,
   data: { feedback_phase: "authentication" },
   func: done => {
-    const suppliedPassword = password;
-    password = null;
-    if (!window.ENCRYPTED_API_KEY) {
-      done({
-        authentication_succeeded: false,
-        authentication_error: "External JS に encrypted-api-key.js が設定されていません。"
-      });
+    if (!API_PROXY_URL.startsWith("https://") || !accessCode) {
+      done({ authentication_succeeded: false, authentication_error: "中継サーバーURLまたはアクセスコードが未設定です。" });
       return;
     }
-    FeedbackUtils.decryptApiKey(window.ENCRYPTED_API_KEY, suppliedPassword, done);
+    fetch(API_PROXY_URL.replace(/\/$/, "") + "/auth", {
+      method: "POST",
+      headers: { authorization: "Bearer " + accessCode }
+    }).then(async response => {
+      const body = await response.json().catch(() => ({}));
+      done({
+        authentication_succeeded: response.ok && body.authenticated === true,
+        authentication_error: response.ok ? null : (body.error || "アクセスコードが無効です。")
+      });
+    }).catch(() => done({
+      authentication_succeeded: false,
+      authentication_error: "中継サーバーに接続できません。URL・Origin設定・通信状態を確認してください。"
+    }));
   },
   on_finish: data => { Object.assign(data, data.value); delete data.value; }
 };
-
 const authenticationTimeline = {
   timeline: [passwordEntry, authentication],
   conditional_function: () => {
